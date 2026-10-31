@@ -32,18 +32,18 @@ const groups = [
     triggers: ["weak", "laro", "tanginamo", "lala", "patawa", "gago", "bobo", "tanga", "hahahaa", "pake ko", "sino yan"],
     replies: [
       "ang baho mo po, baby 😭💕",
-      "baby, explain mo po 'yang kabobohan mo.",
-      "baby, ano po 'yang tukmol ka?",
-      "baby naman, didn't I tell you po 'wag kang tanga?",
-      "hala po, si baby nadapa dahil sa kabobohan niya.",
-      "baby, cute mo po kapag mali ka.",
-      "baby, ang tapang mo po para sa taong ganyan ka-cute.",
-      "baby, saan mo po hinugot 'yang confidence mo?",
-      "baby, may resibo ka po ba o vibes lang?",
-      "baby, ang cute po ng yabang mo.",
-      "baby, pwede bang magpahinga ka muna sa pagiging tanga? 😭",
-      "baby, bakit po parang naka-airplane mode utak mo?",
-      "baby, nag-iisip ka po ba o nagpapacute lang?",
+      "yubab, explain mo po 'yang kabobohan mo.",
+      "bunjing, ano po 'yang tukmol ka?",
+      "baboy ramo naman, didn't I tell you po 'wag kang tanga?",
+      "hala po, si yubab nadapa dahil sa kabobohan niya.",
+      "asoko, cute mo po kapag mali ka.",
+      "dogsko, ang tapang mo po para sa taong ganyan ka-cute.",
+      "aso, saan mo po hinugot 'yang confidence mo?",
+      "dogs, may resibo ka po ba o vibes lang?",
+      "bunjeng, ang cute po ng yabang mo.",
+      "palaka, pwede bang magpahinga ka muna sa pagiging tanga? 😭",
+      "asoko, bakit po parang naka-airplane mode utak mo?",
+      "asoka, nag-iisip ka po ba o nagpapacute lang?",
       "baby, ang lakas mo po magtalk para sa ganyang kaliit na point.",
       "baby, tuloy mo lang po, natutuwa akong panoorin kang malito.",
       "baby, may tutorial po ba para maintindihan kita?",
@@ -158,7 +158,13 @@ const groups = [
       "moka ka aspalto",
       "moka ka tanga",
       "moka ka gago"
-    ]
+    ] " e moka ka namang talakitok
+      " moka kang lamesa jan hahaha
+      " moka kang burat jan
+      " sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)
+ " sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)
+      "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)
+
   }
 ];
 
