@@ -89,6 +89,26 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       return send(res, 401, { ok: false, error: "Dashboard authorization required" });
     }
 
+    if (req.method === "GET" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.getSessionStatus !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try { return send(res,200,{ok:true,session:controls.getSessionStatus()}); }
+      catch(error) { return send(res,503,{ok:false,error:error.message||"Session status unavailable"}); }
+    }
+    if (req.method === "POST" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.saveSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try {
+        const body=await readJson(req);
+        controls.saveSession(body.cookie);
+        record("session-saved",{encrypted:true});
+        return send(res,200,{ok:true,saved:true,encrypted:true,restart_required:true,message:"Cookie encrypted and saved. Restart the Test Bot service in Render to connect using this session."});
+      } catch(error) { return send(res,400,{ok:false,error:error.message||"Could not save session"}); }
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.clearSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try { controls.clearSession(); record("session-cleared"); return send(res,200,{ok:true,cleared:true,restart_required:true}); }
+      catch(error) { return send(res,500,{ok:false,error:"Could not clear saved session"}); }
+    }
+
     if (req.method === "GET" && url.pathname === "/api/dashboard/status") {
       const status = typeof getStatus === "function" ? getStatus() : {};
       return send(res, 200, {
