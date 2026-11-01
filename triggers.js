@@ -1,4 +1,4 @@
-"use strict";
+I'm"use strict";
 
 const { rememberBanatReply, pickBanatReply } = require("./banat-memory");
 
@@ -157,13 +157,13 @@ const groups = [
       "moka ka semento",
       "moka ka aspalto",
       "moka ka tanga",
-      "moka ka gago"
-    ] " e moka ka namang talakitok
-      " moka kang lamesa jan hahaha
-      " moka kang burat jan
-      " sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)
- " sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)
-      "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)
+      "moka ka gago (⁠人⁠ ⁠•͈⁠ᴗ⁠•͈⁠)" ,
+     "e moka ka namang talakitok" ,
+      "moka kang lamesa jan hahaha" ,
+      "moka kang burat jan" ,
+      "sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)" ,
+ "sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)" ,
+      "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)" ,
 
   }
 ];
