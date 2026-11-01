@@ -3,11 +3,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-test("dashboard serves UI and protects control endpoints", async (t) => {
-  const previousKey = process.env.ECLIPSE_DASHBOARD_API_KEY;
+test("dashboard serves UI and restricts API requests by origin without an API key", async (t) => {
   const previousOrigin = process.env.ECLIPSE_DASHBOARD_ORIGIN;
-  process.env.ECLIPSE_DASHBOARD_API_KEY = "test-dashboard-key";
-  process.env.ECLIPSE_DASHBOARD_ORIGIN = "*";
+  process.env.ECLIPSE_DASHBOARD_ORIGIN = "https://test-dashboard.example";
 
   const startDashboardApi = require("../dashboard-api");
   let paused = false;
@@ -28,8 +26,6 @@ test("dashboard serves UI and protects control endpoints", async (t) => {
   });
   t.after(() => {
     server.close();
-    if (previousKey === undefined) delete process.env.ECLIPSE_DASHBOARD_API_KEY;
-    else process.env.ECLIPSE_DASHBOARD_API_KEY = previousKey;
     if (previousOrigin === undefined) delete process.env.ECLIPSE_DASHBOARD_ORIGIN;
     else process.env.ECLIPSE_DASHBOARD_ORIGIN = previousOrigin;
   });
@@ -39,10 +35,10 @@ test("dashboard serves UI and protects control endpoints", async (t) => {
   assert.equal(page.status, 200);
   assert.match(await page.text(), /Banat Test Bot/);
 
-  const unauthorized = await fetch(base + "/api/dashboard/status");
-  assert.equal(unauthorized.status, 401);
+  const blocked = await fetch(base + "/api/dashboard/status", { headers: { Origin: "https://wrong.example" } });
+  assert.equal(blocked.status, 403);
 
-  const headers = { "X-Eclipse-Dashboard-Key": "test-dashboard-key" };
+  const headers = { Origin: "https://test-dashboard.example" };
   const status = await fetch(base + "/api/dashboard/status", { headers });
   assert.equal(status.status, 200);
   const data = await status.json();
