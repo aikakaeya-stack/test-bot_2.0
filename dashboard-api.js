@@ -27,7 +27,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
 
   const readJson = (req) => new Promise((resolve,reject)=>{
     let raw="";
-    req.on("data",chunk=>{raw+=chunk;if(raw.length>16384){reject(new Error("Request body too large"));req.destroy();}});
+    req.on("data",chunk=>{raw+=chunk;if(raw.length>150*1024){reject(new Error("Request body too large"));req.destroy();}});
     req.on("end",()=>{if(!raw.trim())return resolve({});try{resolve(JSON.parse(raw));}catch(_){reject(new Error("Invalid JSON body"));}});
     req.on("error",reject);
   });
