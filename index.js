@@ -51,6 +51,8 @@ let lastMessageAt = null;
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function readSession() {
+  const dashboardSession = require("./session-store").read();
+  if (dashboardSession) return dashboardSession;
   const raw = process.env.FB_COOKIES || process.env.FB_APPSTATE;
 
   if (raw) {
@@ -427,6 +429,9 @@ try {
   }), {
     setPaused: (paused) => { botPaused = paused; },
     getPaused: () => botPaused,
+    saveSession: value => require("./session-store").save(value),
+    getSessionStatus: () => require("./session-store").status(),
+    clearSession: () => require("./session-store").clear(),
     getGroups: () => fetchMessengerGroups(messengerApi),
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
