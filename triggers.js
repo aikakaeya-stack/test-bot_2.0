@@ -1,3 +1,4 @@
+
 "use strict";
 
 const { rememberBanatReply, pickBanatReply } = require("./banat-memory");
@@ -29,7 +30,10 @@ const groups = [
   },
   {
     name: "trash-talk",
-    triggers: ["weak", "laro", "tanginamo", "lala", "patawa", "gago", "bobo", "tanga", "hahahaa", "pake ko", "sino yan"],
+    triggers: [
+      "weak", "laro", "tanginamo", "lala", "patawa",
+      "gago", "bobo", "tanga", "hahahaa", "pake ko", "sino yan"
+    ],
     replies: [
       "ang baho mo po, baby 😭💕",
       "yubab, explain mo po 'yang kabobohan mo.",
@@ -157,51 +161,70 @@ const groups = [
       "moka ka semento",
       "moka ka aspalto",
       "moka ka tanga",
-      "moka ka gago (⁠人⁠ ⁠•͈⁠ᴗ⁠•͈⁠)" ,
-     "e moka ka namang talakitok" ,
-      "moka kang lamesa jan hahaha" ,
-      "moka kang burat jan" ,
-      "sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)" ,
- "sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)" ,
-      "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)" ,
-
+      "moka ka gago (⁠人⁠ ⁠•͈⁠ᴗ⁠•͈⁠)",
+      "e moka ka namang talakitok",
+      "moka kang lamesa jan hahaha",
+      "moka kang burat jan",
+      "sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)",
+      "sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)",
+      "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)"
+    ]
   }
 ];
 
-function normalize(text) { return String(text || "").toLowerCase().replace(/\s+/g, " ").trim(); }
+function normalize(text) {
+  return String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
 
 function findGroups(body) {
   const text = normalize(body);
-  return groups.filter(group => group.triggers.some(trigger => {
-    const t = String(trigger).toLowerCase();
-    return t.length <= 4 ? new RegExp(`\\b${t.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(text) : text.includes(t);
-  }));
+
+  return groups.filter(group =>
+    group.triggers.some(trigger => {
+      const t = String(trigger).toLowerCase();
+
+      return t.length <= 4
+        ? new RegExp(
+            `\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+            "i"
+          ).test(text)
+        : text.includes(t);
+    })
+  );
 }
 
 function getTriggerReply(body, threadID = "") {
   const matched = findGroups(body);
+
   if (!matched.length) return null;
+
   const group = matched[Math.floor(Math.random() * matched.length)];
   const reply = pickBanatReply(threadID, group.replies);
+
   if (reply) rememberBanatReply(threadID, reply);
+
   return reply;
 }
 
 function getBanatConversationReply(body, threadID = "") {
   const direct = getTriggerReply(body, threadID);
+
   if (direct) return direct;
 
   const fallback = groups.flatMap(g => g.replies);
-  // The no-repeat shuffle bag can temporarily have only recently-used items
-  // left. In that edge case, pickBanatReply returns null; active Banat must
-  // still answer ordinary chat instead of silently skipping the message.
+
   const reply =
     pickBanatReply(threadID, fallback) ||
     fallback[Math.floor(Math.random() * fallback.length)] ||
     null;
 
   if (reply) rememberBanatReply(threadID, reply);
+
   return reply;
 }
 
-module.exports = { groups, getTriggerReply, getBanatConversationReply };
+module.exports = {
+  groups,
+  getTriggerReply,
+  getBanatConversationReply
+};
