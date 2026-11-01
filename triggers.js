@@ -1,4 +1,4 @@
-I'm"use strict";
+"use strict";
 
 const { rememberBanatReply, pickBanatReply } = require("./banat-memory");
 
