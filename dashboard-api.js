@@ -1,12 +1,10 @@
 "use strict";
 
 const http = require("http");
-const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
 module.exports = function startDashboardApi(port, getStatus, controls = {}) {
-  const key = String(process.env.ECLIPSE_DASHBOARD_API_KEY || "").trim();
   const origin = String(process.env.ECLIPSE_DASHBOARD_ORIGIN || "*").trim();
   const events = [];
   const dashboardPath = path.join(__dirname, "dashboard.html");
@@ -32,15 +30,6 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     req.on("error",reject);
   });
 
-  const authorized = (req) => {
-    if (!key) return false;
-    const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-    const supplied = String(req.headers["x-eclipse-dashboard-key"] || bearer).trim();
-    const a = Buffer.from(supplied);
-    const b = Buffer.from(key);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  };
-
   const runtime = () => ({
     uptime_seconds: Math.floor(process.uptime()),
     node_version: process.version,
@@ -53,7 +42,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       res.setHeader("Access-Control-Allow-Origin", origin === "*" ? "*" : origin);
     }
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Eclipse-Dashboard-Key");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Cache-Control", "no-store");
 
@@ -75,18 +64,15 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: Boolean(key) });
+      return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: true });
     }
 
     if (!url.pathname.startsWith("/api/dashboard/")) {
       return send(res, 404, { ok: false, error: "Not found" });
     }
 
-    if (!key) {
-      return send(res, 503, { ok: false, error: "Set ECLIPSE_DASHBOARD_API_KEY on this service" });
-    }
-    if (!authorized(req)) {
-      return send(res, 401, { ok: false, error: "Dashboard authorization required" });
+    if (origin !== "*" && requestOrigin !== origin) {
+      return send(res, 403, { ok: false, error: "Dashboard origin not allowed" });
     }
 
     if (req.method === "GET" && url.pathname === "/api/dashboard/session") {
