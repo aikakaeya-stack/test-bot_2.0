@@ -3,7 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const sessionPath = path.resolve(process.env.BOT_SESSION_PATH || path.join(__dirname, "data", "dashboard-session.enc"));
+// Fixed storage location; mount Render's persistent disk at the app's data/ directory.
+const sessionPath = path.resolve(process.cwd(), "data", "dashboard-session.enc");
 function key() {
   const secret = String(process.env.ECLIPSE_SESSION_ENCRYPTION_KEY || "");
   if (Buffer.byteLength(secret) < 32) throw new Error("Set ECLIPSE_SESSION_ENCRYPTION_KEY to a secret of at least 32 bytes before using dashboard cookie storage.");
@@ -24,7 +25,7 @@ function decrypt(raw) {
 }
 function save(value) {
   const cookie = String(value || "").trim();
-  if (!cookie || cookie.length > 120000 || /[\r\n]/.test(cookie)) throw new Error("Paste a valid cookie string (maximum 120 KB, single line).");
+  if (!cookie || cookie.length > 120000 || /[\\r\\n]/.test(cookie)) throw new Error("Paste a valid cookie string (maximum 120 KB, single line).");
   const dir = path.dirname(sessionPath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const temp = sessionPath + ".tmp";
@@ -38,10 +39,10 @@ function read() {
   return decrypt(fs.readFileSync(sessionPath, "utf8"));
 }
 function status() {
-  return { configured: fs.existsSync(sessionPath), storage: "encrypted", path_configured: true };
+  return { configured: fs.existsSync(sessionPath), storage: "encrypted" };
 }
 function clear() {
   if (fs.existsSync(sessionPath)) fs.unlinkSync(sessionPath);
   return { configured: false };
 }
-module.exports = { save, read, status, clear, sessionPath };
+module.exports = { save, read, status, clear };
