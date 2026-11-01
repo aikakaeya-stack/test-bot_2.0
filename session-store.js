@@ -25,7 +25,7 @@ function decrypt(raw) {
 }
 function save(value) {
   const cookie = String(value || "").trim();
-  if (!cookie || cookie.length > 120000 || /[\\r\\n]/.test(cookie)) throw new Error("Paste a valid cookie string (maximum 120 KB, single line).");
+  if (!cookie || cookie.length > 120000 || /[\r\n]/.test(cookie)) throw new Error("Paste a valid cookie string (maximum 120 KB, single line).");
   const dir = path.dirname(sessionPath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const temp = sessionPath + ".tmp";
