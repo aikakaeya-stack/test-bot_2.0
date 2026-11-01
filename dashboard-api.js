@@ -1,12 +1,10 @@
 "use strict";
 
 const http = require("http");
-const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
 module.exports = function startDashboardApi(port, getStatus, controls = {}) {
-  const key = String(process.env.ECLIPSE_DASHBOARD_API_KEY || "").trim();
   const origin = String(process.env.ECLIPSE_DASHBOARD_ORIGIN || "*").trim();
   const events = [];
   const dashboardPath = path.join(__dirname, "dashboard.html");
@@ -27,19 +25,10 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
 
   const readJson = (req) => new Promise((resolve,reject)=>{
     let raw="";
-    req.on("data",chunk=>{raw+=chunk;if(raw.length>16384){reject(new Error("Request body too large"));req.destroy();}});
+    req.on("data",chunk=>{raw+=chunk;if(raw.length>150*1024){reject(new Error("Request body too large"));req.destroy();}});
     req.on("end",()=>{if(!raw.trim())return resolve({});try{resolve(JSON.parse(raw));}catch(_){reject(new Error("Invalid JSON body"));}});
     req.on("error",reject);
   });
-
-  const authorized = (req) => {
-    if (!key) return false;
-    const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-    const supplied = String(req.headers["x-eclipse-dashboard-key"] || bearer).trim();
-    const a = Buffer.from(supplied);
-    const b = Buffer.from(key);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  };
 
   const runtime = () => ({
     uptime_seconds: Math.floor(process.uptime()),
@@ -53,7 +42,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       res.setHeader("Access-Control-Allow-Origin", origin === "*" ? "*" : origin);
     }
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Eclipse-Dashboard-Key");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Cache-Control", "no-store");
 
@@ -75,18 +64,35 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: Boolean(key) });
+      return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: true });
     }
 
     if (!url.pathname.startsWith("/api/dashboard/")) {
       return send(res, 404, { ok: false, error: "Not found" });
     }
 
-    if (!key) {
-      return send(res, 503, { ok: false, error: "Set ECLIPSE_DASHBOARD_API_KEY on this service" });
+    if (origin !== "*" && requestOrigin !== origin) {
+      return send(res, 403, { ok: false, error: "Dashboard origin not allowed" });
     }
-    if (!authorized(req)) {
-      return send(res, 401, { ok: false, error: "Dashboard authorization required" });
+
+    if (req.method === "GET" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.getSessionStatus !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try { return send(res,200,{ok:true,session:controls.getSessionStatus()}); }
+      catch(error) { return send(res,503,{ok:false,error:error.message||"Session status unavailable"}); }
+    }
+    if (req.method === "POST" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.saveSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try {
+        const body=await readJson(req);
+        controls.saveSession(body.cookie);
+        record("session-saved",{encrypted:true});
+        return send(res,200,{ok:true,saved:true,encrypted:true,restart_required:true,message:"Cookie encrypted and saved. Restart the Test Bot service in Render to connect using this session."});
+      } catch(error) { return send(res,400,{ok:false,error:error.message||"Could not save session"}); }
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/dashboard/session") {
+      if (typeof controls.clearSession !== "function") return send(res,501,{ok:false,error:"Session storage unavailable"});
+      try { controls.clearSession(); record("session-cleared"); return send(res,200,{ok:true,cleared:true,restart_required:true}); }
+      catch(error) { return send(res,500,{ok:false,error:"Could not clear saved session"}); }
     }
 
     if (req.method === "GET" && url.pathname === "/api/dashboard/status") {
