@@ -88,3 +88,29 @@ The dashboard API's origin check is controlled by `ECLIPSE_DASHBOARD_ORIGIN`. Da
 ## Safety and deployment
 
 Keep this branch separate until syntax checks and a real test session are verified. Do not deploy solely because the dashboard page loads. Confirm the dashboard API key, CORS origin, session login, command handling, direct targeting, thread cooldown, and pause/resume behavior before merging.
+
+
+## Raid Mode (Test Bot instance)
+
+Raid Mode is a dashboard-only persistent group-theme enforcer. It can enforce the selected group's title, one configured nickname across all current members, and the configured group photo. It does not send Messenger activation or confirmation messages.
+
+The Test Bot's Raid Mode state is stored under the `test-bot` namespace. Theme metadata is stored in the separate `eclipse_raid_themes` table; selected groups and enforcement history use `eclipse_raid_groups` and `eclipse_raid_events`. These tables do not overlap with the Anti-Fork licensing tables. A second bot can use the same Neon database and theme ID while keeping a different bot namespace and its own independent group activation state/dashboard.
+
+Configure these private Render environment variables before using Raid Mode:
+
+| Variable | Purpose |
+| --- | --- |
+| `ECLIPSE_RAID_DATABASE_URL` | Neon PostgreSQL connection string. If omitted, the existing `ECLIPSE_LICENSE_DATABASE_URL` or `DATABASE_URL` is used. |
+| `ECLIPSE_RAID_S3_ENDPOINT` | S3-compatible object-storage endpoint, such as a Cloudflare R2 account endpoint. |
+| `ECLIPSE_RAID_S3_BUCKET` | Private bucket used for Raid Mode theme images. |
+| `ECLIPSE_RAID_S3_ACCESS_KEY_ID` | Object-storage access key ID. |
+| `ECLIPSE_RAID_S3_SECRET_ACCESS_KEY` | Object-storage secret access key. |
+| `ECLIPSE_RAID_S3_REGION` | S3 signing region; use `auto` for Cloudflare R2. |
+| `ECLIPSE_RAID_THEME_ID` | Optional theme key. Defaults to `shared`; use the same value across bot instances only when intentionally reusing one theme. |
+| `ECLIPSE_RAID_BOT_NAMESPACE` | Optional group-state namespace. Test Bot defaults to `test-bot`. |
+
+The dashboard management endpoints require the existing `X-ECLIPSE-DASHBOARD-KEY` configured through `ECLIPSE_DASHBOARD_API_KEY`. Enter that key in the Raid Mode panel; it is sent as a request header and is not saved in browser storage. Upload accepts PNG, JPEG, or WebP up to 5 MB. Image bytes are stored in the private S3-compatible bucket; only the object key and metadata are stored in Neon.
+
+Activation requires a saved theme, uploaded photo, selected group(s), and explicit dashboard confirmation. Event-driven repairs listen for group title/photo, nickname, and membership/admin mutations. A 10-minute reconciliation loop provides a fallback; the image is re-applied at most every 30 minutes during periodic reconciliation. Failed repairs record dashboard-visible status and use bounded backoff, with longer waits for rate-limit responses. Emergency Stop disables enforcement for all groups in this Test Bot namespace.
+
+Before activation, verify the Neon and object-storage settings, dashboard API key, Messenger session permissions, and image bucket access. Do not deploy this feature until a live group test confirms all three Messenger mutations and event delivery.
