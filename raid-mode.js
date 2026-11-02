@@ -295,7 +295,7 @@ function createRaidMode(options = {}) {
 
   async function handleEvent(event) {
     if (!initialized || !event?.threadID) return;
-    const type = String(event.type || event.logMessageType || "").toLowerCase();
+    const type = [event.type, event.logMessageType, event.logMessageData?.type].filter(Boolean).join(" ").toLowerCase();
     if (!/(thread.?name|thread.?image|nickname|subscribe|unsubscribe|participant|admin)/i.test(type)) return;
     const id = String(event.threadID);
     const found = await pool.query("SELECT enabled FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, id]).catch(() => ({ rows: [] }));
