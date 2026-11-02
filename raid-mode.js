@@ -222,7 +222,7 @@ function createRaidMode(options = {}) {
     }
     const imageState = await pool.query("SELECT last_image_sync FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, String(threadID)]);
     const lastImageSync = imageState.rows[0]?.last_image_sync ? new Date(imageState.rows[0].last_image_sync).getTime() : 0;
-    const forceImage = reason !== "periodic-reconcile" || Date.now() - lastImageSync >= 30 * 60_000;
+    const forceImage = reason === "activation" || reason === "manual-repair" || /thread.?image/i.test(reason) || Date.now() - lastImageSync >= 30 * 60_000;
     if (forceImage) {
       await stillEnabled();
       const image = await objectStore.get(theme.imageKey);
