@@ -116,7 +116,9 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     }
 
     if (url.pathname.startsWith("/api/dashboard/raid/")) {
-      const raid = controls.raidMode;\n      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized to manage Raid Mode." });\n      if (!raid) return send(res, 503, { ok: false, error: "Raid Mode is not initialized." });
+      const raid = controls.raidMode;
+      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized to manage Raid Mode." });
+      if (!raid) return send(res, 503, { ok: false, error: "Raid Mode is not initialized." });
       try {
         if (req.method === "GET" && url.pathname === "/api/dashboard/raid/status") {
           return send(res, 200, { ok: true, raid: await raid.getStatus() });
