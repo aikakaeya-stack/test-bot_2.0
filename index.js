@@ -393,7 +393,12 @@ function start(api, generation, sessionCandidate = null) {
   }
 
   if (DEFAULT_ON) console.log("[BANAT] BANAT_DEFAULT_ON enabled.");
-  try {\n    if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });\n  } catch (error) { console.warn("[RAID] Could not enable Messenger group events:", error?.message || error); }\n  if (raidMode.isInitialized()) raidMode.start();\n\n  api.listenMqtt((error, event) => {
+  try {
+    if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });
+  } catch (error) { console.warn("[RAID] Could not enable Messenger group events:", error?.message || error); }
+  if (raidMode.isInitialized()) raidMode.start();
+
+  api.listenMqtt((error, event) => {
     if (generation !== activeListenerGeneration) return;
     if (error) {
       messengerConnected = false;
@@ -426,7 +431,9 @@ function start(api, generation, sessionCandidate = null) {
       lastListenerError = null;
       lastMessageAt = new Date().toISOString();
     }
-    try {\n      if (event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));\n      if (DEFAULT_ON && event?.threadID && event?.senderID && String(event.senderID) !== botUserID) {
+    try {
+      if (event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));
+      if (DEFAULT_ON && event?.threadID && event?.senderID && String(event.senderID) !== botUserID) {
         const key = String(event.threadID);
         if (!activeThreads.has(key)) {
           activeThreads.add(key);
@@ -631,13 +638,20 @@ try {
     getGroups: () => fetchMessengerGroups(messengerApi),
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
-    updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),\n    raidMode,\n    licenseGuard
+    updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),
+    raidMode,
+    licenseGuard
   });
 } catch (error) {
   console.error("[BANAT] dashboard API failed:", error);
 }
 
-raidMode.initialize().then(ok => {\n  if (ok && messengerConnected) raidMode.start();\n  if (!ok) console.warn("[RAID] Raid Mode is unavailable until its Neon configuration is completed.");\n}).catch(error => console.warn("[RAID] initialization failed:", error?.message || error));\n\nlicenseGuard.initialize().then(ok => {
+raidMode.initialize().then(ok => {
+  if (ok && messengerConnected) raidMode.start();
+  if (!ok) console.warn("[RAID] Raid Mode is unavailable until its Neon configuration is completed.");
+}).catch(error => console.warn("[RAID] initialization failed:", error?.message || error));
+
+licenseGuard.initialize().then(ok => {
   licenseAuthorized = ok;
   if (ok) {
     console.log("[ECLIPSE LICENSE] Installation authorized:", licenseGuard.getInstallationId());
