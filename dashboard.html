@@ -59,7 +59,8 @@
     </div>
   </div>
 </section>
-\n<section class="card span12"><h2>Recent dashboard events</h2><div class="actions" style="margin-top:0;margin-bottom:10px"><button id="eventsBtn">Reload events</button><span class="hint" id="eventCount">No events loaded</span></div><div class="log" id="events">No events loaded yet.</div></section>
+
+<section class="card span12"><h2>Recent dashboard events</h2><div class="actions" style="margin-top:0;margin-bottom:10px"><button id="eventsBtn">Reload events</button><span class="hint" id="eventCount">No events loaded</span></div><div class="log" id="events">No events loaded yet.</div></section>
 <section class="card span12"><h2>Dashboard connection</h2><p class="hint">Dashboard requests are restricted to the configured dashboard origin.</p></section>
 </div><p class="footer">Banat Test Bot dashboard · read-only status unless an explicit bot control is available. No automatic deployment is performed by this page.</p>
 </main>
@@ -268,7 +269,8 @@
   $("raidSaveTheme").addEventListener("click",()=>raidSaveTheme().catch(()=>{}));
   $("raidUploadImage").addEventListener("click",()=>raidUploadImage().then(raidRefreshStatus).catch(error=>$("raidThemeMessage").textContent="Photo upload failed: "+error.message));
   $("raidActivate").addEventListener("click",raidActivate);$("raidRefreshStatus").addEventListener("click",raidRefreshStatus);$("raidEmergencyStop").addEventListener("click",raidEmergencyStop);
-\n  $("saveSession").addEventListener("click",saveSession); $("clearSession").addEventListener("click",clearSession); $("refreshSession").addEventListener("click",refreshSession);
+
+  $("saveSession").addEventListener("click",saveSession); $("clearSession").addEventListener("click",clearSession); $("refreshSession").addEventListener("click",refreshSession);
   $("refreshBtn").addEventListener("click",refresh); $("startBtn").addEventListener("click",()=>control("start")); $("stopBtn").addEventListener("click",()=>control("stop")); $("eventsBtn").addEventListener("click",loadEvents);
   $("refreshGroups").addEventListener("click",refreshGroups); $("loadGroup").addEventListener("click",loadGroup); $("saveGroup").addEventListener("click",saveGroup); $("saveReaction").addEventListener("click",saveReaction); $("loadSettings").addEventListener("click",loadSettings);
   refresh(); loadEvents(); loadSettings(); refreshSession(); setInterval(refresh,15000);
