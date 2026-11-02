@@ -25,7 +25,14 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     if (events.length > 80) events.length = 80;
   };
 
-  const readBuffer = (req, maxBytes) => new Promise((resolve,reject)=>{\n    const chunks=[]; let size=0, settled=false;\n    req.on("data",chunk=>{ if(settled)return; size+=chunk.length; if(size>maxBytes){settled=true;reject(new Error("Request body too large"));req.destroy();return;} chunks.push(chunk); });\n    req.on("end",()=>{if(!settled){settled=true;resolve(Buffer.concat(chunks));}});\n    req.on("error",error=>{if(!settled){settled=true;reject(error);}});\n  });\n\n  const readJson = (req) => new Promise((resolve,reject)=>{
+  const readBuffer = (req, maxBytes) => new Promise((resolve,reject)=>{
+    const chunks=[]; let size=0, settled=false;
+    req.on("data",chunk=>{ if(settled)return; size+=chunk.length; if(size>maxBytes){settled=true;reject(new Error("Request body too large"));req.destroy();return;} chunks.push(chunk); });
+    req.on("end",()=>{if(!settled){settled=true;resolve(Buffer.concat(chunks));}});
+    req.on("error",error=>{if(!settled){settled=true;reject(error);}});
+  });
+
+  const readJson = (req) => new Promise((resolve,reject)=>{
     let raw="";
     req.on("data",chunk=>{raw+=chunk;if(raw.length>150*1024){reject(new Error("Request body too large"));req.destroy();}});
     req.on("end",()=>{if(!raw.trim())return resolve({});try{resolve(JSON.parse(raw));}catch(_){reject(new Error("Invalid JSON body"));}});
@@ -93,7 +100,11 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       return send(res, 404, { ok: false, error: "Not found" });
     }
 
-    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");\n    const raidRoute = url.pathname.startsWith("/api/dashboard/raid/");\n    if ((securityRoute || raidRoute) && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {\n      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for this management action." });\n    }
+    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");
+    const raidRoute = url.pathname.startsWith("/api/dashboard/raid/");
+    if ((securityRoute || raidRoute) && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {
+      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for this management action." });
+    }
 
     if (!originAllowed) {
       console.warn("[BANAT] dashboard origin rejected", {
