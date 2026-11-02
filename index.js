@@ -396,7 +396,7 @@ function start(api, generation, sessionCandidate = null) {
   try {
     if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });
   } catch (error) { console.warn("[RAID] Could not enable Messenger group events:", error?.message || error); }
-  if (raidMode.isInitialized()) raidMode.start();
+  if (licenseAuthorized && raidMode.isInitialized()) raidMode.start();
 
   api.listenMqtt((error, event) => {
     if (generation !== activeListenerGeneration) return;
@@ -432,7 +432,7 @@ function start(api, generation, sessionCandidate = null) {
       lastMessageAt = new Date().toISOString();
     }
     try {
-      if (event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));
+      if (licenseAuthorized && event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));
       if (DEFAULT_ON && event?.threadID && event?.senderID && String(event.senderID) !== botUserID) {
         const key = String(event.threadID);
         if (!activeThreads.has(key)) {
@@ -639,8 +639,7 @@ try {
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
     updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),
-    raidMode,
-    licenseGuard
+    raidMode,\n    isLicensed: () => licenseAuthorized,\n    licenseGuard
   });
 } catch (error) {
   console.error("[BANAT] dashboard API failed:", error);
@@ -660,11 +659,9 @@ licenseGuard.initialize().then(ok => {
     console.error("[ECLIPSE LICENSE] Bot processing is disabled:", licenseGuard.getStatus().last_error);
   }
   licenseGuard.startHeartbeat(reason => {
-    licenseAuthorized = false;
-    console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
+    licenseAuthorized = false;\n    raidMode.stop();\n    console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
   }, () => {
-    licenseAuthorized = true;
-    console.log("[ECLIPSE LICENSE] Installation authorization restored.");
+    licenseAuthorized = true;\n    if (raidMode.isInitialized()) raidMode.start();\n    console.log("[ECLIPSE LICENSE] Installation authorization restored.");
     if (!messengerConnected && !loginInProgress) loginBot();
   });
 }).catch(error => {
