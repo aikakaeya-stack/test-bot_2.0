@@ -28,7 +28,8 @@ function createObjectStore(env = process.env) {
     const headers = { "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate };
     if (contentType) headers["content-type"] = contentType;
     const signedNames = Object.keys(headers).map(x => x.toLowerCase()).sort();
-    const allHeaders = { host: base.host, ...headers };\n    const canonicalHeaders = Object.keys(allHeaders).sort().map(name => name + ":" + String(allHeaders[name]).trim() + "\n").join("");
+    const allHeaders = { host: base.host, ...headers };
+    const canonicalHeaders = Object.keys(allHeaders).sort().map(name => name + ":" + String(allHeaders[name]).trim() + "\n").join("");
     const signedHeaders = ["host"].concat(signedNames).sort().join(";");
     const canonicalRequest = [method, canonicalUri, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
     const scope = dateStamp + "/" + region + "/s3/aws4_request";
@@ -89,7 +90,8 @@ function createRaidMode(options = {}) {
     try {
       await pool.query([
         "CREATE TABLE IF NOT EXISTS eclipse_raid_themes (theme_id TEXT PRIMARY KEY, theme JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
-        "CREATE TABLE IF NOT EXISTS eclipse_raid_groups (bot_namespace TEXT NOT NULL, thread_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, status TEXT NOT NULL DEFAULT 'off', last_sync TIMESTAMPTZ, last_image_sync TIMESTAMPTZ, last_error TEXT, failures INTEGER NOT NULL DEFAULT 0, next_retry_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (bot_namespace,thread_id))",\n        "ALTER TABLE eclipse_raid_groups ADD COLUMN IF NOT EXISTS last_image_sync TIMESTAMPTZ",
+        "CREATE TABLE IF NOT EXISTS eclipse_raid_groups (bot_namespace TEXT NOT NULL, thread_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, status TEXT NOT NULL DEFAULT 'off', last_sync TIMESTAMPTZ, last_image_sync TIMESTAMPTZ, last_error TEXT, failures INTEGER NOT NULL DEFAULT 0, next_retry_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (bot_namespace,thread_id))",
+        "ALTER TABLE eclipse_raid_groups ADD COLUMN IF NOT EXISTS last_image_sync TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS eclipse_raid_groups_enabled_idx ON eclipse_raid_groups (bot_namespace,enabled)",
         "CREATE TABLE IF NOT EXISTS eclipse_raid_events (id BIGSERIAL PRIMARY KEY, bot_namespace TEXT NOT NULL, thread_id TEXT, event_type TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
         "CREATE INDEX IF NOT EXISTS eclipse_raid_events_recent_idx ON eclipse_raid_events (bot_namespace,created_at DESC)"
@@ -195,21 +197,38 @@ function createRaidMode(options = {}) {
   async function applyOnce(threadID, reason, generation) {
     const api = apiGetter();
     if (!api) throw new Error("Messenger is disconnected; Raid Mode repair is waiting for reconnection.");
+    const stillEnabled = async () => {
+      if (generation !== stopGeneration) throw new Error("Raid Mode was stopped during repair.");
+      const state = await pool.query("SELECT enabled FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, String(threadID)]);
+      if (!state.rows[0]?.enabled) throw new Error("Raid Mode is no longer active for this group.");
+    };
+    await stillEnabled();
     const theme = await getTheme();
     if (!theme?.groupTitle || !theme?.nickname || !theme?.imageKey) throw new Error("Complete the Raid theme and upload its group photo before activation.");
     const info = await invoke(api, "getThreadInfo", [String(threadID)]);
     const currentTitle = String(info?.threadName || info?.name || "");
-    if (currentTitle !== theme.groupTitle) { await invoke(api, "setTitle", [theme.groupTitle, String(threadID)]); await stillEnabled(); }
+    if (currentTitle !== theme.groupTitle) {
+      await invoke(api, "setTitle", [theme.groupTitle, String(threadID)]);
+      await stillEnabled();
+    }
     const participantIDs = [...new Set((Array.isArray(info?.participantIDs) ? info.participantIDs : []).map(String).filter(Boolean))];
     for (const participantID of participantIDs) {
       const currentNickname = String(info?.nicknames?.[participantID] || info?.participantNicknames?.[participantID] || "");
       if (currentNickname !== theme.nickname) {
+        await stillEnabled();
         await invoke(api, "changeNickname", [theme.nickname, String(threadID), participantID]);
         await sleep(250);
       }
     }
-    const image = await objectStore.get(theme.imageKey);
-    await invoke(api, "changeGroupImage", [Readable.from([image]), String(threadID)]);
+    const imageState = await pool.query("SELECT last_image_sync FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, String(threadID)]);
+    const lastImageSync = imageState.rows[0]?.last_image_sync ? new Date(imageState.rows[0].last_image_sync).getTime() : 0;
+    const forceImage = reason !== "periodic-reconcile" || Date.now() - lastImageSync >= 30 * 60_000;
+    if (forceImage) {
+      await stillEnabled();
+      const image = await objectStore.get(theme.imageKey);
+      await invoke(api, "changeGroupImage", [Readable.from([image]), String(threadID)]);
+      await pool.query("UPDATE eclipse_raid_groups SET last_image_sync=NOW() WHERE bot_namespace=$1 AND thread_id=$2", [namespace, String(threadID)]);
+    }
     return { participants: participantIDs.length };
   }
 
@@ -218,7 +237,8 @@ function createRaidMode(options = {}) {
     if (!initialized || !id) throw new Error("Raid Mode storage or group ID is unavailable.");
     if (inFlight.has(id)) return inFlight.get(id);
     const task = (async () => {
-      const generation = stopGeneration;\n      const current = await pool.query("SELECT enabled,failures,next_retry_at FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, id]);
+      const generation = stopGeneration;
+      const current = await pool.query("SELECT enabled,failures,next_retry_at FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, id]);
       if (!current.rows[0]?.enabled) throw new Error("Raid Mode is not active for this group.");
       const retryAt = current.rows[0].next_retry_at ? new Date(current.rows[0].next_retry_at).getTime() : 0;
       if (retryAt > Date.now() && reason !== "manual-repair") return { skipped: true, retryAt };
@@ -256,14 +276,17 @@ function createRaidMode(options = {}) {
         [namespace, id]);
     }
     await record("raid-activated", null, { groups: ids.length });
-    const results = await Promise.allSettled(ids.map(id => repairGroup(id, "activation")));
-    return { activated: ids.length, results: results.map((result, index) => ({
-      threadID: ids[index], ok: result.status === "fulfilled",
-      error: result.status === "rejected" ? String(result.reason?.message || result.reason) : null
-    })) };
+    const results = [];
+    for (const id of ids) {
+      try { await repairGroup(id, "activation"); results.push({ threadID: id, ok: true, error: null }); }
+      catch (error) { results.push({ threadID: id, ok: false, error: String(error?.message || error) }); }
+      await sleep(1200);
+    }
+    return { activated: ids.length, results };
   }
 
   async function emergencyStop() {
+    stopGeneration += 1;
     if (!initialized) throw new Error(initError || "Raid Mode storage is unavailable.");
     const result = await pool.query("UPDATE eclipse_raid_groups SET enabled=FALSE,status='stopped',next_retry_at=NULL,updated_at=NOW() WHERE bot_namespace=$1 AND enabled=TRUE RETURNING thread_id", [namespace]);
     await record("emergency-stop", null, { groups: result.rowCount });
