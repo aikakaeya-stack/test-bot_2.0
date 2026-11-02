@@ -205,13 +205,12 @@ function createRaidMode(options = {}) {
     await stillEnabled();
     const theme = await getTheme();
     if (!theme?.groupTitle || !theme?.nickname || !theme?.imageKey) throw new Error("Complete the Raid theme and upload its group photo before activation.");
-    const info = await invoke(api, "getThreadInfo", [String(threadID)]);
-    const currentTitle = String(info?.threadName || info?.name || "");
+    const info = await invoke(api, "getThreadInfo", [String(threadID)]);\n    if (!info) throw new Error("Messenger returned no group information for this thread.");\n    if (info.isGroup === false || Number(info.threadType) === 1) throw new Error("Raid Mode can only be activated for group chats.");\n    const currentTitle = String(info?.threadName || info?.name || "");
     if (currentTitle !== theme.groupTitle) {
       await invoke(api, "setTitle", [theme.groupTitle, String(threadID)]);
       await stillEnabled();
     }
-    const participantIDs = [...new Set((Array.isArray(info?.participantIDs) ? info.participantIDs : []).map(String).filter(Boolean))];
+    const participantSource = Array.isArray(info.participantIDs) ? info.participantIDs : Array.isArray(info.participants) ? info.participants.map(person => person?.id || person?.userID || person?.userId) : Object.keys(info.userInfo || {});\n    const participantIDs = [...new Set(participantSource.map(String).filter(Boolean))];
     for (const participantID of participantIDs) {
       const currentNickname = String(info?.nicknames?.[participantID] || info?.participantNicknames?.[participantID] || "");
       if (currentNickname !== theme.nickname) {
