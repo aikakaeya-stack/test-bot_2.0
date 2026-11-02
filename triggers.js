@@ -29,7 +29,7 @@ const groups = [
       "bobo, wala akong pake sa sinasabi mo",
       "edi bot, kwento mo 'yan",
       "amoy basang aso tong kumag na 'to",
-      "puta, baho mo, layo ka nga"
+      "puta, baho mo, layo ka nga" ,
     ]
   },
   {
