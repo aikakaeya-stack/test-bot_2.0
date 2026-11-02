@@ -47,6 +47,15 @@ let lastConnectedAt = null;
 let lastDisconnectedAt = null;
 let lastListenerError = null;
 let lastMessageAt = null;
+let loginInProgress = false;
+let loginGeneration = 0;
+let activeListenerGeneration = 0;
+let loginRetryTimer = null;
+let loginAttempt = 0;
+let queuedReplacementSession = null;
+const MAX_LOGIN_BACKOFF_MS = 5 * 60_000;
+const LISTENER_RETRY_MS = 30_000;
+const RATE_LIMIT_RETRY_MS = 120_000;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -346,21 +355,65 @@ function onMessage(api, event) {
   }
 }
 
-function start(api) {
+function start(api, generation, sessionCandidate = null) {
+  const previousApi = messengerApi;
+  // A replacement becomes active only after login succeeds. Stop the old
+  // listener immediately before promoting the validated API.
+  if (previousApi && previousApi !== api) {
+    activeListenerGeneration = 0;
+    try { previousApi.stopListenMqtt?.(); }
+    catch (error) { console.warn("[BANAT] previous listener stop failed:", error?.message || error); }
+  }
+
   messengerApi = api;
+  activeListenerGeneration = generation;
   messengerConnected = true;
   loginError = null;
+  loginAttempt = 0;
   lastConnectedAt = new Date().toISOString();
+  lastListenerError = null;
   try { botUserID = String(api.getCurrentUserID?.() || ""); } catch (_) {}
+
+  // Keep the freshest session checkpoint in process memory. This remains
+  // ephemeral on Render Free and never writes credentials to disk or logs.
+  try {
+    const refreshed = api.getAppState?.();
+    if (Array.isArray(refreshed) && refreshed.length) {
+      require("./session-store").save(JSON.stringify(refreshed));
+    } else if (sessionCandidate) {
+      require("./session-store").save(sessionCandidate);
+    }
+  } catch (error) {
+    console.warn("[AUTH] Could not refresh in-memory session checkpoint:", error?.message || error);
+  }
 
   if (DEFAULT_ON) console.log("[BANAT] BANAT_DEFAULT_ON enabled.");
 
   api.listenMqtt((error, event) => {
+    if (generation !== activeListenerGeneration) return;
     if (error) {
       messengerConnected = false;
       lastDisconnectedAt = new Date().toISOString();
-      lastListenerError = String(error?.message || error);
-      console.error("[BANAT] listener error:", error);
+      lastListenerError = getFacebookLoginErrorMessage(error);
+      messengerApi = null;
+      activeListenerGeneration = 0;
+      try { api.stopListenMqtt?.(); }
+      catch (stopError) { console.warn("[BANAT] failed listener cleanup:", stopError?.message || stopError); }
+      console.error("[BANAT] listener error:", lastListenerError);
+
+      if (isExplicitSessionRejection(lastListenerError)) {
+        loginError = "Facebook rejected the Messenger session. Paste a fresh session in the dashboard.";
+        console.error("[AUTH] Session rejection detected; automatic login retries are paused.");
+        return;
+      }
+      if (isUnverifiableSessionError(lastListenerError)) {
+        loginError = "Messenger could not verify the session (user ID lookup failed). Check the cookie export and Facebook login state, then submit a fresh session. Automatic retries are paused.";
+        console.error("[AUTH] Session verification is ambiguous; automatic retries are paused for manual review.");
+        return;
+      }
+      const delay = /1675004|rate.?limit|too many requests/i.test(lastListenerError)
+        ? RATE_LIMIT_RETRY_MS : LISTENER_RETRY_MS;
+      scheduleLoginRetry(delay, "listener recovery");
       return;
     }
     if (event) {
@@ -386,6 +439,47 @@ function start(api) {
   console.log(`[BANAT] online${botUserID ? ` as ${botUserID}` : ""}`);
 }
 
+function getFacebookLoginErrorMessage(error) {
+  const parts = [];
+  const seen = new Set();
+  const visit = (value, depth = 0) => {
+    if (value == null || depth > 2) return;
+    if (["string", "number", "boolean"].includes(typeof value)) {
+      const part = String(value).trim();
+      if (part && !parts.includes(part)) parts.push(part);
+      return;
+    }
+    if (typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    for (const key of ["name", "message", "errorDescription", "error_description", "description", "reason", "error", "code", "type"]) {
+      if (key in value) visit(value[key], depth + 1);
+    }
+  };
+  visit(error);
+  return (parts.join(" | ") || "Facebook login failed.")
+    .replace(/(["']?(?:password|cookie|appstate|access[_-]?token|session(?:[_-]?id|[_-]?token)?)["']?\\s*[:=]\\s*)[^,;\\s}]+/gi, "$1[redacted]")
+    .slice(0, 500);
+}
+
+function isExplicitSessionRejection(value) {
+  return /checkpoint|two.factor|2fa|invalid cookie|cookie.*(?:invalid|expired|rejected)|session.*(?:expired|invalid|rejected)|not logged in|login required|authentication failed|account disabled|confirm your identity/i.test(String(value || ""));
+}
+
+function isUnverifiableSessionError(value) {
+  return /error retrieving user.?id|unable to retrieve user.?id|could not retrieve user.?id|no cookie or credentials found/i.test(String(value || ""));
+}
+
+function scheduleLoginRetry(delay, reason) {
+  if (loginRetryTimer) return;
+  const wait = Math.max(1000, Number(delay) || LISTENER_RETRY_MS);
+  console.warn(`[LOGIN] ${reason}; retry scheduled in ${wait}ms.`);
+  loginRetryTimer = setTimeout(() => {
+    loginRetryTimer = null;
+    if (!messengerConnected && !loginInProgress) loginBot();
+  }, wait);
+}
+
+
 function fetchMessengerGroups(api) {
   if(!api||typeof api.getThreadList!=="function") return Promise.reject(new Error("Messenger group list is unavailable from this session"));
   return new Promise((resolve,reject)=>{
@@ -397,19 +491,109 @@ function fetchMessengerGroups(api) {
 }
 
 function loginBot(sessionOverride = null) {
-  const cookie = normalizeSession(sessionOverride || readSession());
-  console.log("[BANAT] logging in with saved Facebook session...");
-  console.log(`[BANAT] session format: cookie string (${cookie.length} chars)`);
-  login(cookie, (error, api) => {
-    if (error) {
-      messengerConnected = false;
-      loginError = String(error?.message || error);
-      console.error("[BANAT] login failed:", error);
-      process.exitCode = 1;
+  if (loginInProgress) {
+    if (sessionOverride) {
+      queuedReplacementSession = sessionOverride;
+      console.warn("[LOGIN] Replacement session queued behind the current login attempt.");
+      return true;
+    }
+    console.warn("[LOGIN] Login already in progress; duplicate attempt skipped.");
+    return false;
+  }
+  if (messengerConnected && messengerApi && activeListenerGeneration > 0 && !sessionOverride) {
+    console.warn("[LOGIN] Existing Messenger listener is healthy; duplicate login skipped.");
+    return false;
+  }
+
+  let cookie;
+  try {
+    const supplied = sessionOverride || readSession();
+    cookie = normalizeSession(require("./session-store").normalizeSessionInput(
+      typeof supplied === "string" ? supplied : JSON.stringify(supplied)
+    ));
+  } catch (error) {
+    loginError = getFacebookLoginErrorMessage(error);
+    console.error("[AUTH] Session input is incomplete or invalid:", loginError);
+    return false;
+  }
+
+  loginInProgress = true;
+  const generation = ++loginGeneration;
+  let settled = false;
+  console.log("[BANAT] validating Messenger session (credential values are never logged).");
+
+  const finishFailure = error => {
+    if (settled || generation !== loginGeneration) return;
+    settled = true;
+    loginInProgress = false;
+    loginError = getFacebookLoginErrorMessage(error);
+    console.error("[AUTH] Messenger login failed:", loginError);
+
+    if (queuedReplacementSession) {
+      const queued = queuedReplacementSession;
+      queuedReplacementSession = null;
+      console.warn("[LOGIN] Starting the queued replacement session after the previous attempt settled.");
+      loginBot(queued);
       return;
     }
-    start(api);
-  });
+
+    // A failed replacement must not displace a currently working API/listener.
+    if (sessionOverride && messengerConnected && messengerApi) {
+      loginError = "Replacement session was rejected; the existing Messenger connection remains active.";
+      console.warn("[AUTH] Keeping the existing Messenger listener after replacement failure.");
+      return;
+    }
+    if (isExplicitSessionRejection(loginError)) {
+      loginError = "Facebook rejected the session. Paste a fresh cookie/appstate export in the dashboard.";
+      console.error("[AUTH] Automatic retries paused because Facebook rejected the session.");
+      return;
+    }
+    if (isUnverifiableSessionError(loginError)) {
+      loginError = "Messenger could not verify the session (user ID lookup failed). Check the cookie export and Facebook login state, then submit a fresh session. Automatic retries are paused.";
+      console.error("[AUTH] Session verification is ambiguous; automatic retries are paused for manual review.");
+      return;
+    }
+
+    loginAttempt += 1;
+    const delay = Math.min(2 ** loginAttempt * 1000, MAX_LOGIN_BACKOFF_MS);
+    scheduleLoginRetry(delay, "transient login failure");
+  };
+
+  try {
+    const result = login(cookie, (error, api) => {
+      if (generation !== loginGeneration || settled) return;
+      if (error || !api) return finishFailure(error || new Error("Login returned no Messenger API."));
+      settled = true;
+      loginInProgress = false;
+      if (loginRetryTimer) {
+        clearTimeout(loginRetryTimer);
+        loginRetryTimer = null;
+      }
+      start(api, generation, sessionOverride);
+      if (queuedReplacementSession) {
+        const queued = queuedReplacementSession;
+        queuedReplacementSession = null;
+        setTimeout(() => loginBot(queued), 0);
+      }
+    });
+    if (result && typeof result.then === "function") {
+      result.then(api => {
+        if (generation !== loginGeneration || settled || !api) return;
+        settled = true;
+        loginInProgress = false;
+        if (loginRetryTimer) { clearTimeout(loginRetryTimer); loginRetryTimer = null; }
+        start(api, generation, sessionOverride);
+        if (queuedReplacementSession) {
+          const queued = queuedReplacementSession;
+          queuedReplacementSession = null;
+          setTimeout(() => loginBot(queued), 0);
+        }
+      }).catch(finishFailure);
+    }
+  } catch (error) {
+    finishFailure(error);
+  }
+  return true;
 }
 
 try {
@@ -419,7 +603,7 @@ try {
     facebook_user_name: null,
     session_active: messengerConnected,
     bot_running: messengerConnected && !botPaused,
-    login_in_progress: false,
+    login_in_progress: loginInProgress,
     login_error: loginError,
     last_connected_at: lastConnectedAt,
     last_disconnected_at: lastDisconnectedAt,
@@ -429,7 +613,11 @@ try {
   }), {
     setPaused: (paused) => { botPaused = paused; },
     getPaused: () => botPaused,
-    saveSession: value => { const saved = require("./session-store").save(value); if (!messengerConnected) loginBot(value); return saved; },
+    saveSession: value => {
+      const candidate = require("./session-store").normalizeSessionInput(value);
+      loginBot(candidate);
+      return { saved: true, validating: true, storage: "memory" };
+    },
     getSessionStatus: () => require("./session-store").status(),
     clearSession: () => require("./session-store").clear(),
     getGroups: () => fetchMessengerGroups(messengerApi),
