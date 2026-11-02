@@ -268,7 +268,8 @@
   $("raidGroupChoices").addEventListener("change",updateRaidSelectionCount);
   $("raidSaveTheme").addEventListener("click",()=>raidSaveTheme().catch(()=>{}));
   $("raidUploadImage").addEventListener("click",()=>raidUploadImage().then(raidRefreshStatus).catch(error=>$("raidThemeMessage").textContent="Photo upload failed: "+error.message));
-  $("raidActivate").addEventListener("click",raidActivate);$("raidRefreshStatus").addEventListener("click",raidRefreshStatus);$("raidEmergencyStop").addEventListener("click",raidEmergencyStop);\n  setInterval(()=>{if($("raidApiKey").value.trim())raidRefreshStatus();},30000);
+  $("raidActivate").addEventListener("click",raidActivate);$("raidRefreshStatus").addEventListener("click",raidRefreshStatus);$("raidEmergencyStop").addEventListener("click",raidEmergencyStop);
+  setInterval(()=>{if($("raidApiKey").value.trim())raidRefreshStatus();},30000);
 
   $("saveSession").addEventListener("click",saveSession); $("clearSession").addEventListener("click",clearSession); $("refreshSession").addEventListener("click",refreshSession);
   $("refreshBtn").addEventListener("click",refresh); $("startBtn").addEventListener("click",()=>control("start")); $("stopBtn").addEventListener("click",()=>control("stop")); $("eventsBtn").addEventListener("click",loadEvents);
