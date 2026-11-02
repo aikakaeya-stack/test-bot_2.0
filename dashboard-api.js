@@ -25,7 +25,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     if (events.length > 80) events.length = 80;
   };
 
-  const readJson = (req) => new Promise((resolve,reject)=>{
+  const readBuffer = (req, maxBytes) => new Promise((resolve,reject)=>{\n    const chunks=[]; let size=0, settled=false;\n    req.on("data",chunk=>{ if(settled)return; size+=chunk.length; if(size>maxBytes){settled=true;reject(new Error("Request body too large"));req.destroy();return;} chunks.push(chunk); });\n    req.on("end",()=>{if(!settled){settled=true;resolve(Buffer.concat(chunks));}});\n    req.on("error",error=>{if(!settled){settled=true;reject(error);}});\n  });\n\n  const readJson = (req) => new Promise((resolve,reject)=>{
     let raw="";
     req.on("data",chunk=>{raw+=chunk;if(raw.length>150*1024){reject(new Error("Request body too large"));req.destroy();}});
     req.on("end",()=>{if(!raw.trim())return resolve({});try{resolve(JSON.parse(raw));}catch(_){reject(new Error("Invalid JSON body"));}});
@@ -51,7 +51,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       res.setHeader("Access-Control-Allow-Origin", origin === "*" ? "*" : (requestOrigin || allowedOrigins[0] || origin));
     }
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-ECLIPSE-DASHBOARD-KEY");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-ECLIPSE-DASHBOARD-KEY, X-File-Name");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Cache-Control", "no-store");
 
@@ -93,10 +93,7 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       return send(res, 404, { ok: false, error: "Not found" });
     }
 
-    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");
-    if (securityRoute && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {
-      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for security management." });
-    }
+    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");\n    const raidRoute = url.pathname.startsWith("/api/dashboard/raid/");\n    if ((securityRoute || raidRoute) && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {\n      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for this management action." });\n    }
 
     if (!originAllowed) {
       console.warn("[BANAT] dashboard origin rejected", {
@@ -105,6 +102,50 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
         requestHostOrigin
       });
       return send(res, 403, { ok: false, error: "Dashboard origin not allowed" });
+    }
+
+    if (url.pathname.startsWith("/api/dashboard/raid/")) {
+      const raid = controls.raidMode;
+      if (!raid) return send(res, 503, { ok: false, error: "Raid Mode is not initialized." });
+      try {
+        if (req.method === "GET" && url.pathname === "/api/dashboard/raid/status") {
+          return send(res, 200, { ok: true, raid: await raid.getStatus() });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/theme") {
+          const body = await readJson(req);
+          const theme = await raid.saveTheme(body);
+          return send(res, 200, { ok: true, theme });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/theme-image") {
+          const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+          const fileName = String(req.headers["x-file-name"] || "raid-theme").slice(0, 120);
+          const buffer = await readBuffer(req, 5 * 1024 * 1024);
+          const image = await raid.uploadImage(buffer, contentType, fileName);
+          return send(res, 200, { ok: true, image });
+        }
+        if (req.method === "GET" && url.pathname === "/api/dashboard/raid/theme-image") {
+          const image = await raid.getImage();
+          if (!image) return send(res, 404, { ok: false, error: "No Raid Mode theme image has been uploaded." });
+          res.writeHead(200, { "Content-Type": image.contentType, "Content-Length": image.buffer.length, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
+          return res.end(image.buffer);
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/activate") {
+          const body = await readJson(req);
+          const result = await raid.activate(body);
+          return send(res, 200, { ok: true, result });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/repair") {
+          const body = await readJson(req);
+          const result = await raid.repairGroup(body.threadID, "manual-repair");
+          return send(res, 200, { ok: true, result });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/emergency-stop") {
+          const result = await raid.emergencyStop();
+          return send(res, 200, { ok: true, result });
+        }
+      } catch (error) {
+        return send(res, 400, { ok: false, error: error.message || "Raid Mode action failed." });
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/dashboard/security/status") {
