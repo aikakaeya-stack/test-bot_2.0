@@ -214,7 +214,7 @@
       if(!raid.groups||!raid.groups.length)statusRoot.textContent="No Raid Mode groups registered.";
       else for(const group of raid.groups){
         const row=document.createElement("div");row.style.padding="6px 0";row.style.borderBottom="1px solid #293244";
-        const text=document.createElement("span");text.textContent=group.threadID+" · "+(group.enabled?"ON":"OFF")+" · "+group.status+(group.lastError?" · "+group.lastError:"");
+        const text=document.createElement("span");text.textContent=group.threadID+" · "+(group.enabled?"ON":"OFF")+" · "+group.status+(group.lastSync?" · synced "+new Date(group.lastSync).toLocaleString():"")+(group.lastError?" · "+group.lastError:"");
         const repair=document.createElement("button");repair.textContent="Repair";repair.style.marginLeft="8px";repair.addEventListener("click",()=>raidRepair(group.threadID));
         row.append(text,repair);statusRoot.append(row);
       }
@@ -268,7 +268,7 @@
   $("raidGroupChoices").addEventListener("change",updateRaidSelectionCount);
   $("raidSaveTheme").addEventListener("click",()=>raidSaveTheme().catch(()=>{}));
   $("raidUploadImage").addEventListener("click",()=>raidUploadImage().then(raidRefreshStatus).catch(error=>$("raidThemeMessage").textContent="Photo upload failed: "+error.message));
-  $("raidActivate").addEventListener("click",raidActivate);$("raidRefreshStatus").addEventListener("click",raidRefreshStatus);$("raidEmergencyStop").addEventListener("click",raidEmergencyStop);
+  $("raidActivate").addEventListener("click",raidActivate);$("raidRefreshStatus").addEventListener("click",raidRefreshStatus);$("raidEmergencyStop").addEventListener("click",raidEmergencyStop);\n  setInterval(()=>{if($("raidApiKey").value.trim())raidRefreshStatus();},30000);
 
   $("saveSession").addEventListener("click",saveSession); $("clearSession").addEventListener("click",clearSession); $("refreshSession").addEventListener("click",refreshSession);
   $("refreshBtn").addEventListener("click",refresh); $("startBtn").addEventListener("click",()=>control("start")); $("stopBtn").addEventListener("click",()=>control("stop")); $("eventsBtn").addEventListener("click",loadEvents);
