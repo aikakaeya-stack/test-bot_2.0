@@ -639,7 +639,9 @@ try {
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
     updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),
-    raidMode,\n    isLicensed: () => licenseAuthorized,\n    licenseGuard
+    raidMode,
+    isLicensed: () => licenseAuthorized,
+    licenseGuard
   });
 } catch (error) {
   console.error("[BANAT] dashboard API failed:", error);
@@ -659,9 +661,13 @@ licenseGuard.initialize().then(ok => {
     console.error("[ECLIPSE LICENSE] Bot processing is disabled:", licenseGuard.getStatus().last_error);
   }
   licenseGuard.startHeartbeat(reason => {
-    licenseAuthorized = false;\n    raidMode.stop();\n    console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
+    licenseAuthorized = false;
+    raidMode.stop();
+    console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
   }, () => {
-    licenseAuthorized = true;\n    if (raidMode.isInitialized()) raidMode.start();\n    console.log("[ECLIPSE LICENSE] Installation authorization restored.");
+    licenseAuthorized = true;
+    if (raidMode.isInitialized()) raidMode.start();
+    console.log("[ECLIPSE LICENSE] Installation authorization restored.");
     if (!messengerConnected && !loginInProgress) loginBot();
   });
 }).catch(error => {
