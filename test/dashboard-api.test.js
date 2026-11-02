@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-test("dashboard serves UI and restricts API requests by origin without an API key", async (t) => {
+test("dashboard serves UI, origin-restricts normal APIs, and protects owner security routes with a key", async (t) => {
   const previousOrigin = process.env.ECLIPSE_DASHBOARD_ORIGIN;
   process.env.ECLIPSE_DASHBOARD_ORIGIN = "https://test-dashboard.example";
 
@@ -17,7 +17,11 @@ test("dashboard serves UI and restricts API requests by origin without an API ke
     last_message_at: "2026-10-26T00:00:00.000Z"
   }), {
     setPaused(value) { paused = Boolean(value); },
-    getPaused() { return paused; }
+    getPaused() { return paused; },
+    licenseGuard: {
+      dashboardAuthorized(req) { return req.headers["x-eclipse-dashboard-key"] === "test-dashboard-key"; },
+      getStatus() { return { mode: "owner", installation_id: "owner-installation" }; }
+    }
   });
 
   await new Promise((resolve, reject) => {
@@ -35,7 +39,7 @@ test("dashboard serves UI and restricts API requests by origin without an API ke
   assert.equal(page.status, 200);
   assert.match(await page.text(), /Banat Test Bot/);
 
-  const blocked = await fetch(base + "/api/dashboard/status", { headers: { Origin: "https://wrong.example" } });
+  const blocked = await fetch(base + "/api/dashboard/status", { headers: { Origin: "https://wrong.example", "X-ECLIPSE-DASHBOARD-KEY": "test-dashboard-key" } });
   assert.equal(blocked.status, 403);
 
   const sameHostOrigin = "https://127.0.0.1:" + server.address().port;
@@ -53,6 +57,12 @@ test("dashboard serves UI and restricts API requests by origin without an API ke
   assert.equal(typeof data.uptime_seconds, "number");
   assert.equal(data.last_listener_error, null);
   assert.equal(data.last_message_at, "2026-10-26T00:00:00.000Z");
+
+  const securityBlocked = await fetch(base + "/api/dashboard/security/status", { headers });
+  assert.equal(securityBlocked.status, 401);
+  const securityAllowed = await fetch(base + "/api/dashboard/security/status", { headers: { ...headers, "X-ECLIPSE-DASHBOARD-KEY": "test-dashboard-key" } });
+  assert.equal(securityAllowed.status, 200);
+  assert.equal((await securityAllowed.json()).license.mode, "owner");
 
   const pause = await fetch(base + "/api/dashboard/bot/stop", {
     method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: "{}"
