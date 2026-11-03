@@ -26,6 +26,11 @@ const { sendBanatReplyWithTyping } = require("./banat-human");
 const { isDuplicateMessage } = require("./message-dedupe");
 const { getGroupSettings, updateGroup: updateGroupSettings, getReactionSettings, isQuietNow, shouldReact } = require("./bot-settings");
 const { classifyBanatTarget, setBanatConversationMode, isBanatConversationModeActive } = require("./banat-targeting");
+const { createLicenseGuard } = require("./license-guard");
+const { createRaidMode } = require("./raid-mode");
+const licenseGuard = createLicenseGuard();
+const raidMode = createRaidMode({ getApi: () => messengerApi, namespace: "test-bot" });
+let licenseAuthorized = false;
 
 const PORT = Number(process.env.PORT || 10000);
 const DEFAULT_ON = /^(1|true|yes|on)$/i.test(process.env.BANAT_DEFAULT_ON || "false");
@@ -319,7 +324,7 @@ function reactToMessage(api,event,emoji) {
 function onMessage(api, event) {
   if (!event) return;
   if (event.type && !["message", "message_reply"].includes(event.type)) return;
-  if (botPaused) return;
+  if (botPaused || !licenseAuthorized) return;
   if (isDuplicateMessage(event.messageID)) {
     console.log(`[BANAT] ignored duplicate message event ${event.messageID}`);
     return;
@@ -388,6 +393,10 @@ function start(api, generation, sessionCandidate = null) {
   }
 
   if (DEFAULT_ON) console.log("[BANAT] BANAT_DEFAULT_ON enabled.");
+  try {
+    if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });
+  } catch (error) { console.warn("[RAID] Could not enable Messenger group events:", error?.message || error); }
+  if (licenseAuthorized && raidMode.isInitialized()) raidMode.start();
 
   api.listenMqtt((error, event) => {
     if (generation !== activeListenerGeneration) return;
@@ -423,6 +432,7 @@ function start(api, generation, sessionCandidate = null) {
       lastMessageAt = new Date().toISOString();
     }
     try {
+      if (licenseAuthorized && event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));
       if (DEFAULT_ON && event?.threadID && event?.senderID && String(event.senderID) !== botUserID) {
         const key = String(event.threadID);
         if (!activeThreads.has(key)) {
@@ -475,7 +485,7 @@ function scheduleLoginRetry(delay, reason) {
   console.warn(`[LOGIN] ${reason}; retry scheduled in ${wait}ms.`);
   loginRetryTimer = setTimeout(() => {
     loginRetryTimer = null;
-    if (!messengerConnected && !loginInProgress) loginBot();
+    if (licenseAuthorized && !messengerConnected && !loginInProgress) loginBot();
   }, wait);
 }
 
@@ -491,6 +501,10 @@ function fetchMessengerGroups(api) {
 }
 
 function loginBot(sessionOverride = null) {
+  if (!licenseAuthorized) {
+    console.warn("[ECLIPSE LICENSE] Messenger login blocked because this installation is not authorized.");
+    return false;
+  }
   if (loginInProgress) {
     if (sessionOverride) {
       queuedReplacementSession = sessionOverride;
@@ -602,17 +616,18 @@ try {
     facebook_connected: messengerConnected,
     facebook_user_name: null,
     session_active: messengerConnected,
-    bot_running: messengerConnected && !botPaused,
+    bot_running: messengerConnected && !botPaused && licenseAuthorized,
     login_in_progress: loginInProgress,
     login_error: loginError,
     last_connected_at: lastConnectedAt,
     last_disconnected_at: lastDisconnectedAt,
     last_listener_error: lastListenerError,
     last_message_at: lastMessageAt,
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
+    license: { ...licenseGuard.getStatus(), authorized: licenseAuthorized }
   }), {
     setPaused: (paused) => { botPaused = paused; },
-    getPaused: () => botPaused,
+    getPaused: () => botPaused || !licenseAuthorized,
     saveSession: value => {
       const candidate = require("./session-store").normalizeSessionInput(value);
       loginBot(candidate);
@@ -623,12 +638,41 @@ try {
     getGroups: () => fetchMessengerGroups(messengerApi),
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
-    updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input)
+    updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),
+    raidMode,
+    isLicensed: () => licenseAuthorized,
+    licenseGuard
   });
 } catch (error) {
   console.error("[BANAT] dashboard API failed:", error);
 }
 
-loginBot();
+raidMode.initialize().then(ok => {
+  if (ok && messengerConnected) raidMode.start();
+  if (!ok) console.warn("[RAID] Raid Mode is unavailable until its Neon configuration is completed.");
+}).catch(error => console.warn("[RAID] initialization failed:", error?.message || error));
+
+licenseGuard.initialize().then(ok => {
+  licenseAuthorized = ok;
+  if (ok) {
+    console.log("[ECLIPSE LICENSE] Installation authorized:", licenseGuard.getInstallationId());
+    loginBot();
+  } else {
+    console.error("[ECLIPSE LICENSE] Bot processing is disabled:", licenseGuard.getStatus().last_error);
+  }
+  licenseGuard.startHeartbeat(reason => {
+    licenseAuthorized = false;
+    raidMode.stop();
+    console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
+  }, () => {
+    licenseAuthorized = true;
+    if (raidMode.isInitialized()) raidMode.start();
+    console.log("[ECLIPSE LICENSE] Installation authorization restored.");
+    if (!messengerConnected && !loginInProgress) loginBot();
+  });
+}).catch(error => {
+  licenseAuthorized = false;
+  console.error("[ECLIPSE LICENSE] Authorization initialization failed; bot processing remains disabled:", error?.message || error);
+});
 
 module.exports = { trafficSendMessage, onMessage, handleBanatCommand };

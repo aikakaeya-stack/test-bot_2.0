@@ -6,8 +6,10 @@ const path = require("path");
 
 module.exports = function startDashboardApi(port, getStatus, controls = {}) {
   const origin = String(process.env.ECLIPSE_DASHBOARD_ORIGIN || "*").trim();
+  const allowedOrigins = origin.split(",").map(value => value.trim()).filter(Boolean);
   const events = [];
   const dashboardPath = path.join(__dirname, "dashboard.html");
+  const licenseGuard = controls.licenseGuard || null;
 
   const send = (res, status, body) => {
     res.writeHead(status, {
@@ -22,6 +24,13 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     events.unshift({ at: new Date().toISOString(), type, ...details });
     if (events.length > 80) events.length = 80;
   };
+
+  const readBuffer = (req, maxBytes) => new Promise((resolve,reject)=>{
+    const chunks=[]; let size=0, settled=false;
+    req.on("data",chunk=>{ if(settled)return; size+=chunk.length; if(size>maxBytes){settled=true;reject(new Error("Request body too large"));req.destroy();return;} chunks.push(chunk); });
+    req.on("end",()=>{if(!settled){settled=true;resolve(Buffer.concat(chunks));}});
+    req.on("error",error=>{if(!settled){settled=true;reject(error);}});
+  });
 
   const readJson = (req) => new Promise((resolve,reject)=>{
     let raw="";
@@ -44,12 +53,12 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       ? (forwardedProto || "http") + "://" + requestHost
       : "";
     const originAllowed = origin === "*" || !requestOrigin ||
-      requestOrigin === origin || requestOrigin === requestHostOrigin;
+      allowedOrigins.includes(requestOrigin) || requestOrigin === requestHostOrigin;
     if (originAllowed) {
-      res.setHeader("Access-Control-Allow-Origin", origin === "*" ? "*" : (requestOrigin || origin));
+      res.setHeader("Access-Control-Allow-Origin", origin === "*" ? "*" : (requestOrigin || allowedOrigins[0] || origin));
     }
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-ECLIPSE-DASHBOARD-KEY, X-File-Name");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Cache-Control", "no-store");
 
@@ -74,8 +83,27 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
       return send(res, 200, { ok: true, service: "banat-test-bot", dashboard_api: true });
     }
 
+    if (req.method === "POST" && url.pathname === "/api/license/verify") {
+      if (!licenseGuard || typeof licenseGuard.verifyIncomingInstallation !== "function") {
+        return send(res, 503, { ok: false, status: "unavailable", error: "License authority is not configured." });
+      }
+      try {
+        const body = await readJson(req);
+        const result = await licenseGuard.verifyIncomingInstallation(body);
+        return send(res, result.status === "approved" ? 200 : 403, result);
+      } catch (error) {
+        return send(res, 400, { ok: false, status: "invalid", error: error.message || "License verification failed." });
+      }
+    }
+
     if (!url.pathname.startsWith("/api/dashboard/")) {
       return send(res, 404, { ok: false, error: "Not found" });
+    }
+
+    const securityRoute = url.pathname.startsWith("/api/dashboard/security/");
+    const raidRoute = url.pathname.startsWith("/api/dashboard/raid/");
+    if ((securityRoute || raidRoute) && (!licenseGuard || !licenseGuard.dashboardAuthorized(req))) {
+      return send(res, 401, { ok: false, error: "Valid X-ECLIPSE-DASHBOARD-KEY required for this management action." });
     }
 
     if (!originAllowed) {
@@ -85,6 +113,76 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
         requestHostOrigin
       });
       return send(res, 403, { ok: false, error: "Dashboard origin not allowed" });
+    }
+
+    if (url.pathname.startsWith("/api/dashboard/raid/")) {
+      const raid = controls.raidMode;
+      if (typeof controls.isLicensed === "function" && !controls.isLicensed()) return send(res, 403, { ok: false, error: "This installation is not authorized to manage Raid Mode." });
+      if (!raid) return send(res, 503, { ok: false, error: "Raid Mode is not initialized." });
+      try {
+        if (req.method === "GET" && url.pathname === "/api/dashboard/raid/status") {
+          return send(res, 200, { ok: true, raid: await raid.getStatus() });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/theme") {
+          const body = await readJson(req);
+          const theme = await raid.saveTheme(body);
+          return send(res, 200, { ok: true, theme });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/theme-image") {
+          const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+          const fileName = String(req.headers["x-file-name"] || "raid-theme").slice(0, 120);
+          const buffer = await readBuffer(req, 5 * 1024 * 1024);
+          const image = await raid.uploadImage(buffer, contentType, fileName);
+          return send(res, 200, { ok: true, image });
+        }
+        if (req.method === "GET" && url.pathname === "/api/dashboard/raid/theme-image") {
+          const image = await raid.getImage();
+          if (!image) return send(res, 404, { ok: false, error: "No Raid Mode theme image has been uploaded." });
+          res.writeHead(200, { "Content-Type": image.contentType, "Content-Length": image.buffer.length, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
+          return res.end(image.buffer);
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/activate") {
+          const body = await readJson(req);
+          const result = await raid.activate(body);
+          return send(res, 200, { ok: true, result });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/repair") {
+          const body = await readJson(req);
+          const result = await raid.repairGroup(body.threadID, "manual-repair");
+          return send(res, 200, { ok: true, result });
+        }
+        if (req.method === "POST" && url.pathname === "/api/dashboard/raid/emergency-stop") {
+          const result = await raid.emergencyStop();
+          return send(res, 200, { ok: true, result });
+        }
+      } catch (error) {
+        return send(res, 400, { ok: false, error: error.message || "Raid Mode action failed." });
+      }
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/dashboard/security/status") {
+      return send(res, 200, { ok: true, license: licenseGuard ? licenseGuard.getStatus() : null, mode: licenseGuard ? (licenseGuard.getStatus().mode) : "unavailable" });
+    }
+    if (req.method === "GET" && url.pathname === "/api/dashboard/security/installations") {
+      try { return send(res, 200, { ok: true, installations: await licenseGuard.listInstallations() }); }
+      catch (error) { return send(res, 503, { ok: false, error: error.message || "Installation registry unavailable." }); }
+    }
+    if (req.method === "GET" && url.pathname === "/api/dashboard/security/forks") {
+      try { return send(res, 200, { ok: true, forks: await licenseGuard.listForks() }); }
+      catch (error) { return send(res, 502, { ok: false, error: error.message || "GitHub fork lookup failed." }); }
+    }
+    if (req.method === "GET" && url.pathname === "/api/dashboard/security/events") {
+      try { return send(res, 200, { ok: true, events: await licenseGuard.listEvents() }); }
+      catch (error) { return send(res, 503, { ok: false, error: error.message || "Security event history unavailable." }); }
+    }
+    const installationAction = url.pathname.match(new RegExp("^/api/dashboard/security/installations/([a-f0-9-]{32,64})/(approve|revoke)$", "i"));
+    if (req.method === "POST" && installationAction) {
+      try {
+        const installation = await licenseGuard.updateInstallation(installationAction[1], installationAction[2] === "approve" ? "approved" : "revoked");
+        return send(res, 200, { ok: true, installation });
+      } catch (error) {
+        return send(res, 400, { ok: false, error: error.message || "Could not update installation authorization." });
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/dashboard/session") {
