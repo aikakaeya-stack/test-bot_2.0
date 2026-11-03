@@ -163,6 +163,19 @@ module.exports = function startDashboardApi(port, getStatus, controls = {}) {
     if (req.method === "GET" && url.pathname === "/api/dashboard/security/status") {
       return send(res, 200, { ok: true, license: licenseGuard ? licenseGuard.getStatus() : null, mode: licenseGuard ? (licenseGuard.getStatus().mode) : "unavailable" });
     }
+    if (req.method === "GET" && url.pathname === "/api/dashboard/security/license-settings") {
+      try { return send(res, 200, { ok: true, settings: await licenseGuard.getLicenseSettings() }); }
+      catch (error) { return send(res, 503, { ok: false, error: error.message || "License settings unavailable." }); }
+    }
+    if (req.method === "POST" && url.pathname === "/api/dashboard/security/license-settings") {
+      try {
+        const body = await readJson(req);
+        const settings = await licenseGuard.updateLicenseSettings(body);
+        return send(res, 200, { ok: true, settings });
+      } catch (error) {
+        return send(res, 400, { ok: false, error: error.message || "Could not update license settings." });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/dashboard/security/installations") {
       try { return send(res, 200, { ok: true, installations: await licenseGuard.listInstallations() }); }
       catch (error) { return send(res, 503, { ok: false, error: error.message || "Installation registry unavailable." }); }
