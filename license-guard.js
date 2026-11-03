@@ -34,6 +34,13 @@ function createLicenseGuard(options = {}) {
   let lastError = null;
   let timer = null;
   let onRevoked = null;
+  let mutationQueue = Promise.resolve();
+
+  function serializeMutation(operation) {
+    const result = mutationQueue.then(operation);
+    mutationQueue = result.catch(() => {});
+    return result;
+  }
 
   function record(registry, type, details = {}) {
     registry.events.unshift({ id: crypto.randomUUID(), at: new Date(now()).toISOString(), type, ...details });
@@ -223,39 +230,43 @@ function createLicenseGuard(options = {}) {
   }
 
   async function updateLicenseSettings(input = {}) {
-    if (!ownerMode) throw new Error("License settings are available only on the license owner service.");
-    const value = Number(input.max_approved_installations);
-    if (!Number.isInteger(value) || value < 0 || value > 10000) {
-      throw new Error("Maximum approved installations must be a whole number from 0 to 10000. Use 0 for unlimited.");
-    }
-    const registry = await store.readRegistry();
-    registry.settings = { max_approved_installations: value };
-    record(registry, "license-settings-updated", { max_approved_installations: value });
-    await store.writeRegistry(registry);
-    return registry.settings;
+    return serializeMutation(async () => {
+      if (!ownerMode) throw new Error("License settings are available only on the license owner service.");
+      const value = Number(input.max_approved_installations);
+      if (!Number.isInteger(value) || value < 0 || value > 10000) {
+        throw new Error("Maximum approved installations must be a whole number from 0 to 10000. Use 0 for unlimited.");
+      }
+      const registry = await store.readRegistry();
+      registry.settings = { max_approved_installations: value };
+      record(registry, "license-settings-updated", { max_approved_installations: value });
+      await store.writeRegistry(registry);
+      return registry.settings;
+    });
   }
 
   async function updateInstallation(id, status) {
-    if (!ownerMode) throw new Error("Installation management is available only on the license owner service.");
-    if (!["approved", "revoked", "pending"].includes(status)) throw new Error("Unsupported installation status.");
-    const registry = await store.readRegistry();
-    const entry = registry.installations[id];
-    if (!entry) throw new Error("Installation not found.");
-    if (id === getInstallationId() && status !== "approved") throw new Error("The owner installation cannot be revoked or downgraded.");
-    if (status === "approved" && entry.status !== "approved") {
-      const limit = Number(registry.settings && registry.settings.max_approved_installations || 0);
-      const approvedCount = Object.values(registry.installations).filter(item =>
-        item && item.status === "approved" && item.installation_id !== getInstallationId()
-      ).length;
-      if (limit > 0 && approvedCount >= limit) {
-        throw new Error("Installation limit reached (" + approvedCount + "/" + limit + "). Revoke an installation or increase the limit before approving another.");
+    return serializeMutation(async () => {
+      if (!ownerMode) throw new Error("Installation management is available only on the license owner service.");
+      if (!["approved", "revoked", "pending"].includes(status)) throw new Error("Unsupported installation status.");
+      const registry = await store.readRegistry();
+      const entry = registry.installations[id];
+      if (!entry) throw new Error("Installation not found.");
+      if (id === getInstallationId() && status !== "approved") throw new Error("The owner installation cannot be revoked or downgraded.");
+      if (status === "approved" && entry.status !== "approved") {
+        const limit = Number(registry.settings && registry.settings.max_approved_installations || 0);
+        const approvedCount = Object.values(registry.installations).filter(item =>
+          item && item.status === "approved" && item.installation_id !== getInstallationId()
+        ).length;
+        if (limit > 0 && approvedCount >= limit) {
+          throw new Error("Installation limit reached (" + approvedCount + "/" + limit + "). Revoke an installation or increase the limit before approving another.");
+        }
       }
-    }
-    entry.status = status;
-    entry.updated_at = new Date(now()).toISOString();
-    record(registry, "installation-" + status, { installation_id: id });
-    await store.writeRegistry(registry);
-    return entry;
+      entry.status = status;
+      entry.updated_at = new Date(now()).toISOString();
+      record(registry, "installation-" + status, { installation_id: id });
+      await store.writeRegistry(registry);
+      return entry;
+    });
   }
 
   async function listEvents() {
