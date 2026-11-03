@@ -100,9 +100,10 @@ function createLicenseStore() {
 
   async function readRegistry() {
     if (pool) {
-      const [installations, events] = await Promise.all([
+      const [installations, events, settings] = await Promise.all([
         pool.query("SELECT installation_id, data FROM eclipse_license_installations"),
-        pool.query("SELECT event_id, at, event_type, details FROM eclipse_license_events ORDER BY at DESC LIMIT 500")
+        pool.query("SELECT event_id, at, event_type, details FROM eclipse_license_events ORDER BY at DESC LIMIT 500"),
+        pool.query("SELECT value FROM eclipse_license_meta WHERE key = 'license_settings'")
       ]);
       const mapped = {};
       for (const row of installations.rows) mapped[row.installation_id] = row.data;
@@ -113,7 +114,8 @@ function createLicenseStore() {
           at: new Date(row.at).toISOString(),
           type: row.event_type,
           ...(row.details || {})
-        }))
+        })),
+        settings: settings.rows[0] ? JSON.parse(settings.rows[0].value) : { max_approved_installations: 0 }
       };
     }
     ensureDir();
@@ -121,11 +123,12 @@ function createLicenseStore() {
       const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
       return {
         installations: parsed && parsed.installations && typeof parsed.installations === "object" ? parsed.installations : {},
-        events: Array.isArray(parsed && parsed.events) ? parsed.events.slice(0, 500) : []
+        events: Array.isArray(parsed && parsed.events) ? parsed.events.slice(0, 500) : [],
+        settings: parsed && parsed.settings && typeof parsed.settings === "object" ? parsed.settings : { max_approved_installations: 0 }
       };
     } catch (error) {
       if (error && error.code !== "ENOENT") throw error;
-      return { installations: {}, events: [] };
+      return { installations: {}, events: [], settings: { max_approved_installations: 0 } };
     }
   }
 
@@ -138,6 +141,12 @@ function createLicenseStore() {
           await client.query(
             "INSERT INTO eclipse_license_installations (installation_id, data) VALUES ($1, $2::jsonb) ON CONFLICT (installation_id) DO UPDATE SET data = EXCLUDED.data",
             [id, JSON.stringify(entry)]
+          );
+        }
+        if (registry.settings) {
+          await client.query(
+            "INSERT INTO eclipse_license_meta (key, value) VALUES ('license_settings', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            [JSON.stringify(registry.settings)]
           );
         }
         for (const event of (registry.events || []).slice(0, 500)) {

@@ -34,6 +34,13 @@ function createLicenseGuard(options = {}) {
   let lastError = null;
   let timer = null;
   let onRevoked = null;
+  let mutationQueue = Promise.resolve();
+
+  function serializeMutation(operation) {
+    const result = mutationQueue.then(operation);
+    mutationQueue = result.catch(() => {});
+    return result;
+  }
 
   function record(registry, type, details = {}) {
     registry.events.unshift({ id: crypto.randomUUID(), at: new Date(now()).toISOString(), type, ...details });
@@ -157,7 +164,13 @@ function createLicenseGuard(options = {}) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.status !== "approved") {
       lease = null;
-      throw new Error(result.error || "Installation is not approved by the ECLIPSE owner.");
+      if (result.status === "pending") {
+        throw new Error("Installation is pending owner approval. Share this installation ID with the owner: " + id);
+      }
+      if (result.status === "revoked") {
+        throw new Error("This installation license has been revoked. Installation ID: " + id);
+      }
+      throw new Error(result.error || "Installation is not approved by the ECLIPSE owner. Installation ID: " + id);
     }
     const verified = verifyLease(result.token);
     if (!verified) {
@@ -215,18 +228,51 @@ function createLicenseGuard(options = {}) {
     return Object.values((await store.readRegistry()).installations).sort((a, b) => String(b.last_seen_at).localeCompare(String(a.last_seen_at)));
   }
 
-  async function updateInstallation(id, status) {
-    if (!ownerMode) throw new Error("Installation management is available only on the license owner service.");
-    if (!["approved", "revoked", "pending"].includes(status)) throw new Error("Unsupported installation status.");
+  async function getLicenseSettings() {
+    if (!ownerMode) throw new Error("License settings are available only on the license owner service.");
     const registry = await store.readRegistry();
-    const entry = registry.installations[id];
-    if (!entry) throw new Error("Installation not found.");
-    if (id === getInstallationId() && status !== "approved") throw new Error("The owner installation cannot be revoked or downgraded.");
-    entry.status = status;
-    entry.updated_at = new Date(now()).toISOString();
-    record(registry, "installation-" + status, { installation_id: id });
-    await store.writeRegistry(registry);
-    return entry;
+    const raw = Number(registry.settings && registry.settings.max_approved_installations || 0);
+    return { max_approved_installations: Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0 };
+  }
+
+  async function updateLicenseSettings(input = {}) {
+    return serializeMutation(async () => {
+      if (!ownerMode) throw new Error("License settings are available only on the license owner service.");
+      const value = Number(input.max_approved_installations);
+      if (!Number.isInteger(value) || value < 0 || value > 10000) {
+        throw new Error("Maximum approved installations must be a whole number from 0 to 10000. Use 0 for unlimited.");
+      }
+      const registry = await store.readRegistry();
+      registry.settings = { max_approved_installations: value };
+      record(registry, "license-settings-updated", { max_approved_installations: value });
+      await store.writeRegistry(registry);
+      return registry.settings;
+    });
+  }
+
+  async function updateInstallation(id, status) {
+    return serializeMutation(async () => {
+      if (!ownerMode) throw new Error("Installation management is available only on the license owner service.");
+      if (!["approved", "revoked", "pending"].includes(status)) throw new Error("Unsupported installation status.");
+      const registry = await store.readRegistry();
+      const entry = registry.installations[id];
+      if (!entry) throw new Error("Installation not found.");
+      if (id === getInstallationId() && status !== "approved") throw new Error("The owner installation cannot be revoked or downgraded.");
+      if (status === "approved" && entry.status !== "approved") {
+        const limit = Number(registry.settings && registry.settings.max_approved_installations || 0);
+        const approvedCount = Object.values(registry.installations).filter(item =>
+          item && item.status === "approved" && item.installation_id !== getInstallationId()
+        ).length;
+        if (limit > 0 && approvedCount >= limit) {
+          throw new Error("Installation limit reached (" + approvedCount + "/" + limit + "). Revoke an installation or increase the limit before approving another.");
+        }
+      }
+      entry.status = status;
+      entry.updated_at = new Date(now()).toISOString();
+      record(registry, "installation-" + status, { installation_id: id });
+      await store.writeRegistry(registry);
+      return entry;
+    });
   }
 
   async function listEvents() {
@@ -236,13 +282,37 @@ function createLicenseGuard(options = {}) {
 
   async function listForks() {
     if (!ownerMode) throw new Error("Fork monitoring is available only on the license owner service.");
+
+    const token = process.env.ECLIPSE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
+    const headers = {
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "ECLIPSE-Anti-Fork-Monitor",
+      "X-GitHub-Api-Version": "2022-11-28"
+    };
+    if (token) headers.Authorization = "Bearer " + token;
+
     const forks = [];
     for (let page = 1; page <= 10; page++) {
       const response = await fetch("https://api.github.com/repos/" + UPSTREAM_REPOSITORY + "/forks?per_page=100&page=" + page + "&sort=oldest", {
-        headers: { "Accept": "application/vnd.github+json", "User-Agent": "ECLIPSE-Anti-Fork-Monitor" },
+        headers,
         signal: AbortSignal.timeout(12_000)
       });
-      if (!response.ok) throw new Error("GitHub fork lookup failed with HTTP " + response.status);
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const remaining = response.headers.get("x-ratelimit-remaining");
+        const reset = response.headers.get("x-ratelimit-reset");
+        const retryAfter = response.headers.get("retry-after");
+        const detail = String(body.message || body.error || response.statusText || "Unknown GitHub API error").slice(0, 240);
+        const rateLimited = response.status === 429 || (response.status === 403 && (remaining === "0" || /rate limit/i.test(detail)));
+        const hint = rateLimited
+          ? " GitHub rate limit reached" + (reset ? "; reset at " + new Date(Number(reset) * 1000).toISOString() : retryAfter ? "; retry after " + retryAfter + " seconds" : ".")
+          : response.status === 403
+            ? " Check the GitHub token's repository access and fork metadata permissions."
+            : "";
+        throw new Error("GitHub fork lookup failed with HTTP " + response.status + ": " + detail + "." + hint);
+      }
+
       const batch = await response.json();
       if (!Array.isArray(batch)) throw new Error("GitHub returned an invalid fork list.");
       forks.push(...batch.map(item => ({
@@ -268,6 +338,8 @@ function createLicenseGuard(options = {}) {
     dashboardAuthorized,
     listInstallations,
     updateInstallation,
+    getLicenseSettings,
+    updateLicenseSettings,
     listEvents,
     listForks,
     stop() { if (timer) clearInterval(timer); timer = null; store.close().catch(() => {}); }
