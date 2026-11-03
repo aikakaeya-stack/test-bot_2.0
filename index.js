@@ -27,7 +27,9 @@ const { isDuplicateMessage } = require("./message-dedupe");
 const { getGroupSettings, updateGroup: updateGroupSettings, getReactionSettings, isQuietNow, shouldReact } = require("./bot-settings");
 const { classifyBanatTarget, setBanatConversationMode, isBanatConversationModeActive } = require("./banat-targeting");
 const { createLicenseGuard } = require("./license-guard");
+const { createRaidMode } = require("./raid-mode");
 const licenseGuard = createLicenseGuard();
+const raidMode = createRaidMode({ getApi: () => messengerApi, namespace: "test-bot" });
 let licenseAuthorized = false;
 
 const PORT = Number(process.env.PORT || 10000);
@@ -391,6 +393,10 @@ function start(api, generation, sessionCandidate = null) {
   }
 
   if (DEFAULT_ON) console.log("[BANAT] BANAT_DEFAULT_ON enabled.");
+  try {
+    if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });
+  } catch (error) { console.warn("[RAID] Could not enable Messenger group events:", error?.message || error); }
+  if (licenseAuthorized && raidMode.isInitialized()) raidMode.start();
 
   api.listenMqtt((error, event) => {
     if (generation !== activeListenerGeneration) return;
@@ -426,6 +432,7 @@ function start(api, generation, sessionCandidate = null) {
       lastMessageAt = new Date().toISOString();
     }
     try {
+      if (licenseAuthorized && event) raidMode.handleEvent(event).catch(error => console.warn("[RAID] event handler failed:", error?.message || error));
       if (DEFAULT_ON && event?.threadID && event?.senderID && String(event.senderID) !== botUserID) {
         const key = String(event.threadID);
         if (!activeThreads.has(key)) {
@@ -632,11 +639,18 @@ try {
     getSettings: () => require("./bot-settings").getSettings(),
     updateReaction: input => require("./bot-settings").updateReaction(input),
     updateGroup: (threadID,input) => require("./bot-settings").updateGroup(threadID,input),
+    raidMode,
+    isLicensed: () => licenseAuthorized,
     licenseGuard
   });
 } catch (error) {
   console.error("[BANAT] dashboard API failed:", error);
 }
+
+raidMode.initialize().then(ok => {
+  if (ok && messengerConnected) raidMode.start();
+  if (!ok) console.warn("[RAID] Raid Mode is unavailable until its Neon configuration is completed.");
+}).catch(error => console.warn("[RAID] initialization failed:", error?.message || error));
 
 licenseGuard.initialize().then(ok => {
   licenseAuthorized = ok;
@@ -648,9 +662,11 @@ licenseGuard.initialize().then(ok => {
   }
   licenseGuard.startHeartbeat(reason => {
     licenseAuthorized = false;
+    raidMode.stop();
     console.error("[ECLIPSE LICENSE] Authorization revoked; message processing disabled:", reason);
   }, () => {
     licenseAuthorized = true;
+    if (raidMode.isInitialized()) raidMode.start();
     console.log("[ECLIPSE LICENSE] Installation authorization restored.");
     if (!messengerConnected && !loginInProgress) loginBot();
   });
