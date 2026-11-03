@@ -76,6 +76,21 @@ function changeNickname(api, nickname, threadID, participantID) {
   return invoke(api, "changeNickname", [nickname, String(threadID), String(participantID)]);
 }
 
+function setRaidTitle(api, title, threadID) {
+  return invoke(api, "setTitle", [title, String(threadID)]);
+}
+
+function changeRaidGroupImage(api, image, threadID) {
+  return invoke(api, "changeGroupImage", [image, String(threadID)]);
+}
+
+function isRaidMutationEvent(event) {
+  if (!event || !event.threadID) return false;
+  const type = [event.type, event.logMessageType, event.logMessageData?.type]
+    .filter(Boolean).join(" ").toLowerCase();
+  return /(thread.?name|thread.?image|user.?nickname|nickname|subscribe|unsubscribe|participant|admin)/i.test(type);
+}
+
 function createRaidMode(options = {}) {
   const env = options.env || process.env;
   const namespace = String(options.namespace || env.ECLIPSE_RAID_BOT_NAMESPACE || "test-bot").slice(0, 64);
@@ -215,7 +230,7 @@ function createRaidMode(options = {}) {
     if (info.isGroup === false || Number(info.threadType) === 1) throw new Error("Raid Mode can only be activated for group chats.");
     const currentTitle = String(info?.threadName || info?.name || "");
     if (currentTitle !== theme.groupTitle) {
-      await invoke(api, "setTitle", [theme.groupTitle, String(threadID)]);
+      await setRaidTitle(api, theme.groupTitle, threadID);
       await stillEnabled();
     }
     const participantSource = Array.isArray(info.participantIDs) ? info.participantIDs : Array.isArray(info.participants) ? info.participants.map(person => person?.id || person?.userID || person?.userId) : Object.keys(info.userInfo || {});
@@ -234,7 +249,7 @@ function createRaidMode(options = {}) {
     if (forceImage) {
       await stillEnabled();
       const image = await objectStore.get(theme.imageKey);
-      await invoke(api, "changeGroupImage", [Readable.from([image]), String(threadID)]);
+      await changeRaidGroupImage(api, Readable.from([image]), threadID);
       await pool.query("UPDATE eclipse_raid_groups SET last_image_sync=NOW() WHERE bot_namespace=$1 AND thread_id=$2", [namespace, String(threadID)]);
     }
     return { participants: participantIDs.length };
@@ -302,9 +317,8 @@ function createRaidMode(options = {}) {
   }
 
   async function handleEvent(event) {
-    if (!initialized || !event?.threadID) return;
+    if (!initialized || !isRaidMutationEvent(event)) return;
     const type = [event.type, event.logMessageType, event.logMessageData?.type].filter(Boolean).join(" ").toLowerCase();
-    if (!/(thread.?name|thread.?image|nickname|subscribe|unsubscribe|participant|admin)/i.test(type)) return;
     const id = String(event.threadID);
     const found = await pool.query("SELECT enabled FROM eclipse_raid_groups WHERE bot_namespace=$1 AND thread_id=$2", [namespace, id]).catch(() => ({ rows: [] }));
     if (!found.rows[0]?.enabled) return;
@@ -337,4 +351,4 @@ function createRaidMode(options = {}) {
     isInitialized: () => initialized
   };
 }
-module.exports = { createRaidMode, createObjectStore, changeNickname };
+module.exports = { createRaidMode, createObjectStore, changeNickname, setRaidTitle, changeRaidGroupImage, isRaidMutationEvent };
