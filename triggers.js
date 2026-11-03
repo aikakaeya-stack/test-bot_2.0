@@ -175,8 +175,9 @@ const groups = [
       "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)" ,
     "sopaen mo ttkels ko (⁠ʘ⁠ᴗ⁠ʘ⁠✿⁠)" ,
       "soboen mo boyat kueh <⁠(⁠￣⁠︶⁠￣⁠)⁠>" ,
-      "sosopaen mo na ba ako dogsko?" ,
-      "lalamo, wag mo sopaen ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)" ,
+            "sosopaen mo na ba ako dogsko?",
+      "lalamo, wag mo sopaen ttkels ko (⁠*⁠´⁠ω⁠｀⁠*)"
+    ]
   }
 ];
 
