@@ -50,6 +50,18 @@ test("owner service approves itself and requires explicit approval for new insta
     assert.equal(approved.status, "approved");
     assert.ok(approved.token);
 
+    await owner.updateLicenseSettings({ max_approved_installations: 1 });
+    const secondId = crypto.randomUUID();
+    const secondPending = await owner.verifyIncomingInstallation({ installation_id: secondId, repository: "someone/another-fork" });
+    assert.equal(secondPending.status, "pending");
+    await assert.rejects(
+      owner.updateInstallation(secondId, "approved"),
+      /Installation limit reached/
+    );
+    await owner.updateInstallation(unknownId, "revoked");
+    await owner.updateInstallation(secondId, "approved");
+    assert.equal((await owner.getLicenseSettings()).max_approved_installations, 1);
+
     const clientDir = path.join(root, "client");
     fs.mkdirSync(clientDir, { recursive: true });
     fs.writeFileSync(path.join(clientDir, "installation-id"), unknownId);
