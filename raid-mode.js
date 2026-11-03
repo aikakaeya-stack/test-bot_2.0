@@ -71,6 +71,11 @@ function invoke(api, method, args) {
   });
 }
 
+// ws3-fca@2.0.1 signature: changeNickname(nickname, threadID, participantID, callback).
+function changeNickname(api, nickname, threadID, participantID) {
+  return invoke(api, "changeNickname", [nickname, String(threadID), String(participantID)]);
+}
+
 function createRaidMode(options = {}) {
   const env = options.env || process.env;
   const namespace = String(options.namespace || env.ECLIPSE_RAID_BOT_NAMESPACE || "test-bot").slice(0, 64);
@@ -219,7 +224,7 @@ function createRaidMode(options = {}) {
       const currentNickname = String(info?.nicknames?.[participantID] || info?.participantNicknames?.[participantID] || "");
       if (currentNickname !== theme.nickname) {
         await stillEnabled();
-        await invoke(api, "changeNickname", [theme.nickname, String(threadID), participantID]);
+        await changeNickname(api, theme.nickname, threadID, participantID);
         await sleep(250);
       }
     }
@@ -332,4 +337,4 @@ function createRaidMode(options = {}) {
     isInitialized: () => initialized
   };
 }
-module.exports = { createRaidMode, createObjectStore };
+module.exports = { createRaidMode, createObjectStore, changeNickname };
