@@ -64,7 +64,7 @@ test("owner service approves itself and requires explicit approval for new insta
 
     const clientDir = path.join(root, "client");
     fs.mkdirSync(clientDir, { recursive: true });
-    fs.writeFileSync(path.join(clientDir, "installation-id"), unknownId);
+    fs.writeFileSync(path.join(clientDir, "installation-id"), secondId);
     const originalFetch = global.fetch;
     global.fetch = async (_url, options) => {
       const result = await owner.verifyIncomingInstallation(JSON.parse(options.body));
