@@ -164,7 +164,13 @@ function createLicenseGuard(options = {}) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.status !== "approved") {
       lease = null;
-      throw new Error(result.error || "Installation is not approved by the ECLIPSE owner.");
+      if (result.status === "pending") {
+        throw new Error("Installation is pending owner approval. Share this installation ID with the owner: " + id);
+      }
+      if (result.status === "revoked") {
+        throw new Error("This installation license has been revoked. Installation ID: " + id);
+      }
+      throw new Error(result.error || "Installation is not approved by the ECLIPSE owner. Installation ID: " + id);
     }
     const verified = verifyLease(result.token);
     if (!verified) {
