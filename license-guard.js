@@ -236,13 +236,37 @@ function createLicenseGuard(options = {}) {
 
   async function listForks() {
     if (!ownerMode) throw new Error("Fork monitoring is available only on the license owner service.");
+
+    const token = process.env.ECLIPSE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
+    const headers = {
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "ECLIPSE-Anti-Fork-Monitor",
+      "X-GitHub-Api-Version": "2022-11-28"
+    };
+    if (token) headers.Authorization = "Bearer " + token;
+
     const forks = [];
     for (let page = 1; page <= 10; page++) {
       const response = await fetch("https://api.github.com/repos/" + UPSTREAM_REPOSITORY + "/forks?per_page=100&page=" + page + "&sort=oldest", {
-        headers: { "Accept": "application/vnd.github+json", "User-Agent": "ECLIPSE-Anti-Fork-Monitor" },
+        headers,
         signal: AbortSignal.timeout(12_000)
       });
-      if (!response.ok) throw new Error("GitHub fork lookup failed with HTTP " + response.status);
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const remaining = response.headers.get("x-ratelimit-remaining");
+        const reset = response.headers.get("x-ratelimit-reset");
+        const retryAfter = response.headers.get("retry-after");
+        const detail = String(body.message || body.error || response.statusText || "Unknown GitHub API error").slice(0, 240);
+        const rateLimited = response.status === 429 || (response.status === 403 && (remaining === "0" || /rate limit/i.test(detail)));
+        const hint = rateLimited
+          ? " GitHub rate limit reached" + (reset ? "; reset at " + new Date(Number(reset) * 1000).toISOString() : retryAfter ? "; retry after " + retryAfter + " seconds" : ".")
+          : response.status === 403
+            ? " Check the GitHub token's repository access and fork metadata permissions."
+            : "";
+        throw new Error("GitHub fork lookup failed with HTTP " + response.status + ": " + detail + "." + hint);
+      }
+
       const batch = await response.json();
       if (!Array.isArray(batch)) throw new Error("GitHub returned an invalid fork list.");
       forks.push(...batch.map(item => ({
