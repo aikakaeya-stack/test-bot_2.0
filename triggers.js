@@ -173,7 +173,7 @@ const groups = [
       "bai-gone",
       "bai-tamins",
       "one bai one",
-      "young pake ko nasaan ba? wala naman e, wala kasi akong pake hahaha" ,
+      "young pake ko nasaan ba? wala naman e, wala kasi akong pake hahaha",
       "hanapin mo muna papa mo ✌️😅" ,
       "mama mo mukhang palaka"
       "papa mo nag shashabu hahaha" 
@@ -210,9 +210,9 @@ const groups = [
       "sosopaen mo na ba ako (⁠☆⁠▽⁠☆⁠)",
       "sopaen mo ttkels ko (⁠*⁠´⁠ω⁠｀⁠*⁠)",
       "chopaen mo boyat ko (⁠≧⁠▽⁠≦⁠)" ,
-    "sopaen mo ttkels ko (⁠ʘ⁠ᴗ⁠ʘ⁠✿⁠)" ,
+      "sopaen mo ttkels ko (⁠ʘ⁠ᴗ⁠ʘ⁠✿⁠)" ,
       "soboen mo boyat kueh <⁠(⁠￣⁠︶⁠￣⁠)⁠>" ,
-            "sosopaen mo na ba ako dogsko?",
+      "sosopaen mo na ba ako dogsko?",
       "lalamo, wag mo sopaen ttkels ko (⁠*⁠´⁠ω⁠｀⁠*)"
       "tinanong ko ba yan? hahaha" ,
       "may pake ba ko jan? owshie ahha" ,
@@ -222,7 +222,7 @@ const groups = [
       "ah young papa mo ba?" ,
       "hahaha young ate mo" ,
       "e kaso wala ka ngang mama e hahaha" ,
-      "wala ka pala papa hahahs char" 
+      "wala ka pala papa hahahs char" , 
       "waka kang tyansa saken hoy ahahaha"
       "young lola mo patay na gagu" ,
       "young lolo mo kinantot ng kuya mo hahaha" ,
